@@ -196,7 +196,13 @@ function __applyTexts(id, list) {
 // change does it keep the drawing function and ask that section's canvas to repaint
 // (main.qml then calls __secPaint, in the same frame).
 var __secs = {}, __secFrame = 0;
-function __secRegister(name, canvas) { __secs[name] = { canvas: canvas, deps: null, fn: null, m: null, a: 1, seen: -1, shown: false }; }
+function __secRegister(name, canvas) { __secs[name] = { canvas: canvas, deps: null, fn: null, m: null, a: 1, seen: -1, shown: false, busy: 0 }; }
+// A canvas is "busy" from requestPaint until Qt has rendered it (its painted signal -> __secDone).
+// While busy, changes wait for the next frame instead of queueing up: queued paints made the
+// picture lag behind the keys. (Safety: a paint that never reports back frees it after 300 ms.)
+function __busy(s) { return s.busy && Date.now() - s.busy < 300; }
+function __secDone(name) { var s = __secs[name]; if (s) s.busy = 0; }
+function __secRequest(s) { s.busy = Date.now(); s.canvas.requestPaint(); }
 function __same(a, b) {
   if (!b || a.length !== b.length) return false;
   for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
@@ -208,9 +214,10 @@ function __secHook(name, deps, fn, c, frameSig, bounds) {
   var a = c.globalAlpha, full = deps.concat(frameSig || [], __m, [a]);
   s.seen = __secFrame;
   if (s.shown && __same(full, s.deps)) return;
+  if (__busy(s)) return;                            // still drawing the last change: try again next frame
   s.deps = full; s.fn = fn; s.m = __m.slice(); s.a = a; s.shown = true;
   if (bounds) __secFit(s.canvas, bounds);
-  s.canvas.requestPaint();
+  __secRequest(s);
 }
 // move/resize a section's canvas to the on-screen box around its local bounds (whole pixels, on the stage)
 function __secFit(cv, b) {
@@ -230,7 +237,7 @@ function __secFit(cv, b) {
 function __secEndFrame() {          // sections not drawn this frame (faded out, other mode) get cleared once
   for (var k in __secs) {
     var s = __secs[k];
-    if (s.seen !== __secFrame && s.shown) { s.shown = false; s.fn = null; s.deps = null; s.canvas.requestPaint(); }
+    if (s.seen !== __secFrame && s.shown && !__busy(s)) { s.shown = false; s.fn = null; s.deps = null; __secRequest(s); }
   }
   __secFrame++;
 }
@@ -254,6 +261,29 @@ function __secPaint(name, c, api, ox, oy, w, h) {   // the canvas covers (ox, oy
 }
 
 function __setMeasureCtx(c) { __measureCtx = c; }
+// A do-nothing 2D context: when the live layer itself hasn't changed, draw() still runs against
+// this so the sections are checked, but nothing is painted or uploaded.
+var __nullCtx = (function () {
+  var c = { globalAlpha: 1, font: "", fillStyle: "", strokeStyle: "", lineWidth: 1, lineCap: "butt", lineJoin: "miter",
+            textAlign: "left", textBaseline: "top", globalCompositeOperation: "source-over", lineDashOffset: 0, miterLimit: 10 };
+  var _st = [];
+  var grad = { addColorStop: function () {} };
+  ["beginPath", "moveTo", "lineTo", "arc", "arcTo", "quadraticCurveTo", "bezierCurveTo", "closePath", "rect", "fill", "stroke",
+   "fillRect", "strokeRect", "clearRect", "translate", "scale", "rotate", "clip", "fillText", "setLineDash", "setTransform",
+   "ellipse", "drawImage"].forEach(function (n) { c[n] = function () {}; });
+  c.save = function () { _st.push(c.globalAlpha); };
+  c.restore = function () { if (_st.length) c.globalAlpha = _st.pop(); };
+  c.createLinearGradient = c.createRadialGradient = function () { return grad; };
+  c.createPattern = function () { return null; };
+  c.measureText = function (s) { if (__measureCtx) { __measureCtx.font = c.font; return __measureCtx.measureText(s); } return { width: String(s).length * 6 }; };
+  c.reset = function () { _st = []; c.globalAlpha = 1; };
+  return c;
+})();
+function __drawSectionsOnly(api) {
+  __nullCtx.reset(); api.setCtx(__nullCtx); __beginLive(__nullCtx);
+  api.draw();
+  __endLive(); __secEndFrame();
+}
 var __API = null;
 function __exportCluster(api) { __API = api; }
 // ===== end of prelude: shared cluster code follows =====

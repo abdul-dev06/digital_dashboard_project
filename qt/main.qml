@@ -120,7 +120,9 @@ Window {
                      { name: "trips",     z: 4,   r: [0, 0, 420, 445] },    { name: "economy", z: 4, r: [170, 0, 320, 445] },
                      { name: "car",       z: 4,   r: [720, 0, 440, 445] },  { name: "vehicle", z: 4, r: [740, 0, 440, 445] },
                      { name: "rings",     z: 4,   r: [880, 0, 400, 445] },  { name: "tachFace", z: 4.5, r: [180, 0, 920, 480] },
-                     { name: "tach",      z: 5,   r: [180, 0, 920, 480] },  { name: "lamps", z: 6, r: [0, 420, 1280, 60] } ]
+                     { name: "tach",      z: 5,   r: [180, 0, 920, 480] },  { name: "lamps", z: 6, r: [0, 420, 1280, 60] },
+                     { name: "sportL",    z: 5.5, r: [0, 0, 560, 445] },    { name: "sportR", z: 5.5, r: [720, 0, 560, 445] },
+                     { name: "sportM",    z: 5.6, r: [400, 0, 480, 445] } ]
             delegate: Item {
                 required property var modelData
                 readonly property string name: modelData.name
@@ -141,6 +143,7 @@ Window {
                         parent.on = C.__secPaint(parent.name, c, api, x, y, width, height);
                         win.jsMs += Date.now() - t0;
                     }
+                    onPainted: C.__secDone(parent.name)
                 }
                 Repeater { id: tx; model: 40; delegate: liveText }
             }
@@ -152,6 +155,9 @@ Window {
             anchors.fill: parent
             z: 10
             renderStrategy: Canvas.Threaded
+            property real busy: 0          // time of the last requestPaint until Qt has rendered it
+            property var sig: null         // liveSig() at the last paint
+            onPainted: busy = 0
             onPaint: {
                 var c = getContext("2d");
                 C.__setMeasureCtx(c);
@@ -239,7 +245,15 @@ Window {
         onTriggered: {
             api.step(C.performance.now());
             win.frameNo++;
-            live.requestPaint();
+            // Repaint the live layer only when what it shows changed, and never queue a paint
+            // behind one Qt hasn't rendered yet (queued paints made the picture lag behind the keys).
+            // Otherwise draw() still runs against a do-nothing context so the sections get updated.
+            var sig = api.liveSig(), free = !live.busy || Date.now() - live.busy > 300;
+            if (free && !C.__same(sig, live.sig)) {
+                live.sig = sig; live.busy = Date.now(); live.requestPaint();
+            } else {
+                var t0 = Date.now(); C.__drawSectionsOnly(api); win.jsMs += Date.now() - t0;
+            }
             var t = api.topActive();
             if (t || win.topWas) top.requestPaint();     // one last paint clears it
             win.topWas = t;

@@ -1887,6 +1887,15 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   function section(name, deps, fn, bounds) { if (sectionHook) sectionHook(name, deps, fn, ctx, frameSig, bounds); else fn(); }
   const SPEED_BOX = [SCX - SR - 24, SCY - SR - 24, 2 * (SR + 24), 2 * (SR + 24)];   // includes the drop shade
   const TACH_BOX = [DCX - DR - 28, DCY - DR - 28, 2 * (DR + 28), 2 * (DR + 28)];
+  const SPORT_L_BOX = [24, 16, 512, 410], SPORT_R_BOX = [W - 536, 16, 512, 410];      // the brackets, with glow
+  const SPORT_M_BOX = [W / 2 - 210, 40, 420, 400];                                   // engine and logo
+  // Everything else on the live layer: when none of this changes, Qt skips repainting that layer.
+  function liveSig() {
+    const now = new Date();
+    return [modeK, ecoA, sportA, TH.accent, MODE.to, ...Object.values(A), ...Object.values(SPX),
+      MT < 1.4 ? MT : -1, ENGINE.runFx < 1.5 ? ENGINE.runFx : -1, S.leftTurn, S.rightTurn,
+      now.getHours() * 60 + now.getMinutes(), Math.round(S.outsideTemp)];
+  }
   function draw() {
     const lamp = A.lamps;
     if (sectionHook) frameSig = [modeK, ecoA, sportA, TH.accent, TH.tick, TH.needle, TH.redband, TH.car];
@@ -1966,9 +1975,14 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // ---------- Sport layout (live parts) ----------
     if (sportIn > 0.002) {
       const a = A.dash * sportIn;
-      withTf(a, () => ctx.translate(-SPX.off, 0), drawSportLeft);
-      withTf(a, () => ctx.translate(SPX.off, 0), drawSportRight);
-      withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), drawSportMiddle);
+      withTf(a, () => ctx.translate(-SPX.off, 0), () => section("sportL", [Math.round(S.rpm / 5), Math.round(S.coolant),
+        Math.round(S.fuel * 100), Math.round(S.range), S.batteryVolts >= CFG.chargeVolts], drawSportLeft, SPORT_L_BOX));
+      withTf(a, () => ctx.translate(SPX.off, 0), () => section("sportR", [Math.round(S.speed * 20), Math.round(S.realSpeed || 0)],
+        drawSportRight, SPORT_R_BOX));
+      // engine: pulleys turn with the crank; the logo eases (redK) and flashes at redline, so time is a dep then
+      const now = performance.now(), flashing = S.rpm >= REDLINE || redK > 0 || (shiftFlash && now / 1000 - shiftFlash.t < 0.9);
+      withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), () => section("sportM", [crank, engHeat, chargeK, Math.round(S.intakeTemp),
+        Math.round(S.engineLoad), S.timing.toFixed(0), Math.round(S.rpm / 5), Math.min(MT, 1), flashing ? now : 0], drawSportMiddle, SPORT_M_BOX));
     }
     if (ecoA > 0.5) speedo();
 
@@ -2317,7 +2331,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
   if (typeof __exportCluster === "function") __exportCluster({
     step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
-    setSectionHook: f => { sectionHook = f; }, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    setSectionHook: f => { sectionHook = f; }, liveSig, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));

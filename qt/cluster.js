@@ -196,7 +196,13 @@ function __applyTexts(id, list) {
 // change does it keep the drawing function and ask that section's canvas to repaint
 // (main.qml then calls __secPaint, in the same frame).
 var __secs = {}, __secFrame = 0;
-function __secRegister(name, canvas) { __secs[name] = { canvas: canvas, deps: null, fn: null, m: null, a: 1, seen: -1, shown: false }; }
+function __secRegister(name, canvas) { __secs[name] = { canvas: canvas, deps: null, fn: null, m: null, a: 1, seen: -1, shown: false, busy: 0 }; }
+// A canvas is "busy" from requestPaint until Qt has rendered it (its painted signal -> __secDone).
+// While busy, changes wait for the next frame instead of queueing up: queued paints made the
+// picture lag behind the keys. (Safety: a paint that never reports back frees it after 300 ms.)
+function __busy(s) { return s.busy && Date.now() - s.busy < 300; }
+function __secDone(name) { var s = __secs[name]; if (s) s.busy = 0; }
+function __secRequest(s) { s.busy = Date.now(); s.canvas.requestPaint(); }
 function __same(a, b) {
   if (!b || a.length !== b.length) return false;
   for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
@@ -208,9 +214,10 @@ function __secHook(name, deps, fn, c, frameSig, bounds) {
   var a = c.globalAlpha, full = deps.concat(frameSig || [], __m, [a]);
   s.seen = __secFrame;
   if (s.shown && __same(full, s.deps)) return;
+  if (__busy(s)) return;                            // still drawing the last change: try again next frame
   s.deps = full; s.fn = fn; s.m = __m.slice(); s.a = a; s.shown = true;
   if (bounds) __secFit(s.canvas, bounds);
-  s.canvas.requestPaint();
+  __secRequest(s);
 }
 // move/resize a section's canvas to the on-screen box around its local bounds (whole pixels, on the stage)
 function __secFit(cv, b) {
@@ -230,7 +237,7 @@ function __secFit(cv, b) {
 function __secEndFrame() {          // sections not drawn this frame (faded out, other mode) get cleared once
   for (var k in __secs) {
     var s = __secs[k];
-    if (s.seen !== __secFrame && s.shown) { s.shown = false; s.fn = null; s.deps = null; s.canvas.requestPaint(); }
+    if (s.seen !== __secFrame && s.shown && !__busy(s)) { s.shown = false; s.fn = null; s.deps = null; __secRequest(s); }
   }
   __secFrame++;
 }
@@ -254,6 +261,29 @@ function __secPaint(name, c, api, ox, oy, w, h) {   // the canvas covers (ox, oy
 }
 
 function __setMeasureCtx(c) { __measureCtx = c; }
+// A do-nothing 2D context: when the live layer itself hasn't changed, draw() still runs against
+// this so the sections are checked, but nothing is painted or uploaded.
+var __nullCtx = (function () {
+  var c = { globalAlpha: 1, font: "", fillStyle: "", strokeStyle: "", lineWidth: 1, lineCap: "butt", lineJoin: "miter",
+            textAlign: "left", textBaseline: "top", globalCompositeOperation: "source-over", lineDashOffset: 0, miterLimit: 10 };
+  var _st = [];
+  var grad = { addColorStop: function () {} };
+  ["beginPath", "moveTo", "lineTo", "arc", "arcTo", "quadraticCurveTo", "bezierCurveTo", "closePath", "rect", "fill", "stroke",
+   "fillRect", "strokeRect", "clearRect", "translate", "scale", "rotate", "clip", "fillText", "setLineDash", "setTransform",
+   "ellipse", "drawImage"].forEach(function (n) { c[n] = function () {}; });
+  c.save = function () { _st.push(c.globalAlpha); };
+  c.restore = function () { if (_st.length) c.globalAlpha = _st.pop(); };
+  c.createLinearGradient = c.createRadialGradient = function () { return grad; };
+  c.createPattern = function () { return null; };
+  c.measureText = function (s) { if (__measureCtx) { __measureCtx.font = c.font; return __measureCtx.measureText(s); } return { width: String(s).length * 6 }; };
+  c.reset = function () { _st = []; c.globalAlpha = 1; };
+  return c;
+})();
+function __drawSectionsOnly(api) {
+  __nullCtx.reset(); api.setCtx(__nullCtx); __beginLive(__nullCtx);
+  api.draw();
+  __endLive(); __secEndFrame();
+}
 var __API = null;
 function __exportCluster(api) { __API = api; }
 // ===== end of prelude: shared cluster code follows =====
@@ -2012,6 +2042,15 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   function section(name, deps, fn, bounds) { if (sectionHook) sectionHook(name, deps, fn, ctx, frameSig, bounds); else fn(); }
   const SPEED_BOX = [SCX - SR - 24, SCY - SR - 24, 2 * (SR + 24), 2 * (SR + 24)];   // includes the drop shade
   const TACH_BOX = [DCX - DR - 28, DCY - DR - 28, 2 * (DR + 28), 2 * (DR + 28)];
+  const SPORT_L_BOX = [24, 16, 512, 410], SPORT_R_BOX = [W - 536, 16, 512, 410];      // the brackets, with glow
+  const SPORT_M_BOX = [W / 2 - 210, 40, 420, 400];                                   // engine and logo
+  // Everything else on the live layer: when none of this changes, Qt skips repainting that layer.
+  function liveSig() {
+    const now = new Date();
+    return [modeK, ecoA, sportA, TH.accent, MODE.to, ...Object.values(A), ...Object.values(SPX),
+      MT < 1.4 ? MT : -1, ENGINE.runFx < 1.5 ? ENGINE.runFx : -1, S.leftTurn, S.rightTurn,
+      now.getHours() * 60 + now.getMinutes(), Math.round(S.outsideTemp)];
+  }
   function draw() {
     const lamp = A.lamps;
     if (sectionHook) frameSig = [modeK, ecoA, sportA, TH.accent, TH.tick, TH.needle, TH.redband, TH.car];
@@ -2091,9 +2130,14 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // ---------- Sport layout (live parts) ----------
     if (sportIn > 0.002) {
       const a = A.dash * sportIn;
-      withTf(a, () => __M_translate(ctx, -SPX.off, 0), drawSportLeft);
-      withTf(a, () => __M_translate(ctx, SPX.off, 0), drawSportRight);
-      withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), drawSportMiddle);
+      withTf(a, () => __M_translate(ctx, -SPX.off, 0), () => section("sportL", [Math.round(S.rpm / 5), Math.round(S.coolant),
+        Math.round(S.fuel * 100), Math.round(S.range), S.batteryVolts >= CFG.chargeVolts], drawSportLeft, SPORT_L_BOX));
+      withTf(a, () => __M_translate(ctx, SPX.off, 0), () => section("sportR", [Math.round(S.speed * 20), Math.round(S.realSpeed || 0)],
+        drawSportRight, SPORT_R_BOX));
+      // engine: pulleys turn with the crank; the logo eases (redK) and flashes at redline, so time is a dep then
+      const now = performance.now(), flashing = S.rpm >= REDLINE || redK > 0 || (shiftFlash && now / 1000 - shiftFlash.t < 0.9);
+      withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), () => section("sportM", [crank, engHeat, chargeK, Math.round(S.intakeTemp),
+        Math.round(S.engineLoad), S.timing.toFixed(0), Math.round(S.rpm / 5), Math.min(MT, 1), flashing ? now : 0], drawSportMiddle, SPORT_M_BOX));
     }
     if (ecoA > 0.5) speedo();
 
@@ -2442,7 +2486,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
   if (typeof __exportCluster === "function") __exportCluster({
     step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
-    setSectionHook: f => { sectionHook = f; }, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    setSectionHook: f => { sectionHook = f; }, liveSig, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));
