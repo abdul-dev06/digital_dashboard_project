@@ -23,7 +23,9 @@ def sub(pattern, repl, count_min=1, regex=True):
     js = re.sub(pattern, repl, js) if regex else js.replace(pattern, repl)
 
 # fonts: Qt's canvas wants one family name, loaded by FontLoader in main.qml
-sub(r"const FONT = '[^']*';", 'const FONT = "DejaVu Sans";')
+# (quoted: Qt 6.8 drops the space from an unquoted "DejaVu Sans", can't find "DejaVuSans",
+#  and then keeps the previous font, so labels came out in the big gauge-numeral font)
+sub(r"const FONT = '[^']*';", 'const FONT = "\'DejaVu Sans\'";')
 for fam in ("Rajdhani", "Quicksand", "Michroma"):
     sub(r"family: \"'%s'[^\"]*\"" % fam, 'family: "%s"' % fam)
 # canvas calls that differ between the browser and Qt

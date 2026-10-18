@@ -244,7 +244,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const cv = document.getElementById("cluster");
   let ctx = cv.getContext("2d");
   const W = 1280, H = 480;
-  const FONT = "DejaVu Sans";
+  const FONT = "'DejaVu Sans'";
   const RED = "#ff2d3f";
 
   // ================= Drive modes =================
