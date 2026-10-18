@@ -1302,10 +1302,14 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
 
   // Eco: economy bar = live rpm as a share of redline. Lower is better.
   let econShown = 0, econT = 0;
-  function drawEconomy() {
-    const now = performance.now() / 1000, dt = Math.min(0.1, now - (econT || now)); econT = now;
+  // eased bar level and leaf fade, advanced once per frame in step() (drawing only reads them)
+  function econUpdate(dt) {
     const target = Math.max(0, Math.min(1, S.rpm / REDLINE));
     econShown += (target - econShown) * Math.min(1, dt * 6);
+    if (Math.abs(target - econShown) < 1e-4) econShown = target;
+    leafK = Math.max(0, Math.min(1, leafK + (econShown <= CFG.ecoBand[1] ? dt / 0.35 : -dt / 0.25)));
+  }
+  function drawEconomy() {
     const f = econShown, good = CFG.ecoBand[1], heavy = CFG.ecoHeavy;
     const col = f <= good ? THEMES.eco.accent : f <= heavy ? "#ffb020" : "#ff2d3f";
     const state = f <= good ? "EFFICIENT" : f <= heavy ? "MODERATE" : "HEAVY";
@@ -1347,8 +1351,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     text(cv, x, 330, 20, "#e8ecf0", { weight: 500, base: "alphabetic", family: NUMFONTS.eco.family });
     text(cu, x + measure(cv, 20, 500, 0, NUMFONTS.eco.family) + 4, 330, 9, "#7d8996", { base: "alphabetic" });
     text(state, x, by1 - 6, 10, col, { weight: 700, base: "alphabetic", ls: 2 });
-    // green leaf beside the state word while in the efficient range (fades in/out)
-    leafK = Math.max(0, Math.min(1, leafK + (f <= good ? dt / 0.35 : -dt / 0.25)));
+    // green leaf beside the state word while in the efficient range (fades in/out, see econUpdate)
     if (leafK > 0.01) drawLeaf(x + measure(state, 10, 700, 2) + 14, by1 - 10, 9, THEMES.eco.accent, smooth(leafK));
   }
   let leafK = 0;
@@ -1936,7 +1939,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       const avg = S.tripTime > 30 ? Math.round(S.tripDist / (S.tripTime / 3600)) : -1;
       section("trips", [S.tripA.toFixed(1), S.tripB.toFixed(1), S.tripDist.toFixed(1), fmtTime(S.tripTime), avg,
                         S.avgL100 === null ? "" : S.avgL100.toFixed(1)], drawTrips);
-      // economy eases its bar toward the rpm and fades the leaf inside drawEconomy, so those are deps too
+      // the bar level and leaf fade ease in econUpdate(), so they are deps too
       if (ecoA > 0.01) withAlpha(ecoA, () => section("economy", [Math.round(S.rpm / 5), Math.round(econShown * 2000), leafK,
         (S.realSpeed || 0) < 1, S.l100 === null ? "" : S.l100.toFixed(1), S.lph.toFixed(1)], drawEconomy));
 
@@ -2230,7 +2233,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       updateEngine(dt, D.rpm);                                   // in the car: the polled rpm (PID 0C)
       if (ENGINE.runFx < 1.5 || ENGINE.lowVoltT > 0) moving = true;
       S.rpm = D.rpm + (MODE.to === "sport" && MT < 0.75 && ENGINE.state === "running" ? 0.5 * REDLINE * Math.sin(Math.PI * MT / 0.75) : 0);
-      toySensors(dt); updateDerived(dt); roadUpdate(dt); traceUpdate(dt);
+      toySensors(dt); updateDerived(dt); roadUpdate(dt); traceUpdate(dt); econUpdate(dt);
     }
     currentAlert = updateAlerts(ts / 1000);
     if (currentAlert || ALERTS.some(a => a.active)) moving = true;
@@ -2331,7 +2334,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
   if (typeof __exportCluster === "function") __exportCluster({
     step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
-    setSectionHook: f => { sectionHook = f; }, liveSig, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    setSectionHook: f => { sectionHook = f; }, liveSig, setMode, mode: () => MODE.to, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));
