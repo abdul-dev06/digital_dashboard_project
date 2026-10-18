@@ -4,10 +4,12 @@
 // loop and the keyboard.
 //
 // Layers, bottom to top (static ones are painted once, then only moved/faded by the GPU):
-//   background -> redline wash -> chrome pieces (per mode, clipped) -> live canvas -> its text
+//   background -> redline wash -> chrome pieces (per mode, clipped) -> sections -> live canvas -> its text
 //   -> overlay canvas (warning popup, start-up logo; only repainted while showing) -> its text
 // Text on the live layers is shown with native Text items (see __applyTexts in cluster.js):
 // Qt's canvas draws text slowly, and the strings rarely change between frames.
+// Sections (gauge faces, gauge needles, trips, rings, vehicle, lamps...) have their own canvas + text and are only
+// repainted when their inputs change (see section() in web/index.html, __secHook in cluster.js).
 //
 // Keys: K key on, E start/stop engine, Space rev, arrows shift, 1/2/3 modes,
 //       C cold, H overheat, M check engine, F filled up, I icy, L OBD lost, Esc quit.
@@ -41,6 +43,12 @@ Window {
     Component.onCompleted: {
         C.__setTexUrl(Qt.resolvedUrl("texture.png").toString());
         api.setLayered(true);
+        api.setSectionHook(C.__secHook);
+        for (var si = 0; si < sections.count; si++) {
+            var sec = sections.itemAt(si), items = [];
+            for (var ti = 0; ti < sec.texts.count; ti++) items.push(sec.texts.itemAt(ti));
+            C.__secRegister(sec.name, sec.canvas); C.__setPool(sec.name, items);
+        }
         var a = [], b = [];
         for (var i = 0; i < textsA.count; i++) a.push(textsA.itemAt(i));
         for (var j = 0; j < textsB.count; j++) b.push(textsB.itemAt(j));
@@ -106,7 +114,36 @@ Window {
             }
         }
 
-        // ---- live layer: gauges, needles, text, engine, lamps (redrawn every frame) ----
+        // ---- sections: each repainted only when what it shows changes ----
+        Repeater {
+            id: sections
+            model: [ { name: "speedFace", z: 2.5 }, { name: "speed", z: 3 }, { name: "tachFace", z: 4.5 }, { name: "trips", z: 4 }, { name: "economy", z: 4 }, { name: "car", z: 4 },
+                     { name: "vehicle", z: 4 }, { name: "rings", z: 4 },
+                     { name: "tach", z: 5 }, { name: "lamps", z: 6 } ]
+            delegate: Item {
+                required property var modelData
+                readonly property string name: modelData.name
+                property alias canvas: cv
+                property alias texts: tx
+                anchors.fill: parent
+                // the speedometer goes on top of the tach once Eco is past halfway
+                z: (name === "speed" || name === "speedFace") ? (win.frameNo, modelData.z + (api.speedOnTop() ? 4 : 0)) : modelData.z
+                Canvas {
+                    id: cv
+                    anchors.fill: parent
+                    renderStrategy: Canvas.Threaded
+                    Component.onCompleted: loadImage(Qt.resolvedUrl("texture.png"))
+                    onPaint: {
+                        var t0 = Date.now(), c = getContext("2d");
+                        C.__setMeasureCtx(c); C.__secPaint(parent.name, c, api);
+                        win.jsMs += Date.now() - t0;
+                    }
+                }
+                Repeater { id: tx; model: 40; delegate: liveText }
+            }
+        }
+
+        // ---- live layer: everything else that moves (redrawn every frame) ----
         Canvas {
             id: live
             anchors.fill: parent
@@ -120,6 +157,7 @@ Window {
                 C.__beginLive(c);
                 api.draw();
                 C.__applyTexts("A", C.__endLive());
+                C.__secEndFrame();
                 win.jsMs += Date.now() - t0;
             }
         }

@@ -197,6 +197,48 @@ function __applyTexts(id, list) {
   for (var j = n; j < pool.length; j++) if (keys[j] !== "") { keys[j] = ""; pool[j].visible = false; }
 }
 
+// ---- sections: live parts on their own canvases, repainted only when their inputs change ----
+// draw() calls the hook instead of drawing a section. The hook compares the section's deps, the
+// frame's theme state and where/how faded the section would be drawn with last time; only on a
+// change does it keep the drawing function and ask that section's canvas to repaint
+// (main.qml then calls __secPaint, in the same frame).
+var __secs = {}, __secFrame = 0;
+function __secRegister(name, canvas) { __secs[name] = { canvas: canvas, deps: null, fn: null, m: null, a: 1, seen: -1, shown: false }; }
+function __same(a, b) {
+  if (!b || a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+function __secHook(name, deps, fn, c, frameSig) {
+  var s = __secs[name];
+  if (!s || c !== __L) { fn(); return; }           // no canvas for it, or not on the live layer: draw in place
+  var a = c.globalAlpha, full = deps.concat(frameSig || [], __m, [a]);
+  s.seen = __secFrame;
+  if (s.shown && __same(full, s.deps)) return;
+  s.deps = full; s.fn = fn; s.m = __m.slice(); s.a = a; s.shown = true;
+  s.canvas.requestPaint();
+}
+function __secEndFrame() {          // sections not drawn this frame (faded out, other mode) get cleared once
+  for (var k in __secs) {
+    var s = __secs[k];
+    if (s.seen !== __secFrame && s.shown) { s.shown = false; s.fn = null; s.deps = null; s.canvas.requestPaint(); }
+  }
+  __secFrame++;
+}
+function __secPaint(name, c, api) {
+  var s = __secs[name];
+  c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.clearRect(0, 0, 1280, 480);
+  __beginLive(c);
+  if (s && s.fn) {
+    api.setCtx(c);
+    var m = s.m;
+    __M_save(c); __M_setTransform(c, m[0], m[1], m[2], m[3], m[4], m[5]); c.globalAlpha = s.a;
+    s.fn();
+    __M_restore(c);
+  }
+  __applyTexts(name, __endLive());
+}
+
 function __setTexUrl(u) { __texUrl = u; }
 function __setMeasureCtx(c) { __measureCtx = c; }
 var __API = null;

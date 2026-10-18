@@ -352,6 +352,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
     return w;
   }
+  // 1234.56 -> "1,234.6" (by hand: Qt's JavaScript ignores toLocaleString's options)
+  const fmtNum = (v, digits = 0) => { const [i, f] = v.toFixed(digits).split("."); return i.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (f ? "." + f : ""); };
   const fmtTime = s => { const m = Math.floor(s / 60), h = Math.floor(m / 60), mm = m % 60; return h + ":" + (mm < 10 ? "0" : "") + mm; };
 
   // ---- Shapes ----
@@ -525,6 +527,17 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     text(value, right - 18 - uw - 3, y + 28, 19, warn ? RED : "#f2f4f7", { align: "right", base: "alphabetic" });
   }
 
+  // Strokes many short segments with one stroke per (width, colour) instead of one each:
+  // same picture, far fewer canvas calls. segs: [x0, y0, x1, y1, width, colour]
+  function strokeBatch(segs) {
+    const groups = new Map();
+    for (const sg of segs) { const k = sg[4] + "|" + sg[5]; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(sg); }
+    for (const list of groups.values()) {
+      ctx.beginPath();
+      for (const [x0, y0, x1, y1] of list) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
+      ctx.lineWidth = list[0][4]; ctx.strokeStyle = list[0][5]; ctx.stroke();
+    }
+  }
   function miniGauge(o) {
     // Segmented ring: no bezel, no needle. Lit segments show the level, a
     // glowing tip marks the exact value, the number sits in the middle.
@@ -545,14 +558,23 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       ctx.lineWidth = 10; ctx.strokeStyle = lit; ctx.globalAlpha *= 0.07; ctx.stroke();
       ctx.restore();
     }
+    const byCol = new Map();                              // one stroke per colour
     for (let i = 0; i < N; i++) {
       const a0 = A0 + i * (segSw + gap), mid = (i + 0.5) / N;
-      ctx.beginPath(); ctx.arc(cx, cy, r, a0 * Math.PI / 180, (a0 + segSw) * Math.PI / 180);
-      ctx.lineWidth = 6;
       const zone = mid >= wStart && mid <= wEnd;
-      if (mid <= k) ctx.strokeStyle = zone ? warnColor : lit;
-      else ctx.strokeStyle = zone ? (warnColor === RED ? "#3a1016" : "#3a2a0c") : "#182028";
-      ctx.stroke();
+      const col = mid <= k ? (zone ? warnColor : lit) : (zone ? (warnColor === RED ? "#3a1016" : "#3a2a0c") : "#182028");
+      if (!byCol.has(col)) byCol.set(col, []);
+      byCol.get(col).push(a0);
+    }
+    ctx.lineWidth = 6;
+    for (const [col, starts] of byCol) {
+      ctx.beginPath();
+      for (const a0 of starts) {
+        const r0 = a0 * Math.PI / 180;
+        ctx.moveTo(cx + Math.cos(r0) * r, cy + Math.sin(r0) * r);
+        ctx.arc(cx, cy, r, r0, (a0 + segSw) * Math.PI / 180);
+      }
+      ctx.strokeStyle = col; ctx.stroke();
     }
     // tip
     const ta = (A0 + SW * k) * Math.PI / 180;
@@ -573,7 +595,14 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // left side and over the top, ending at 3 o'clock where it tucks under the tach.
   const SCX = 322, SCY = 262, SR = 128, SMAX = CFG.speedMax;
   const sAng = v => 180 + 270 * Math.max(0, Math.min(1, v / SMAX));   // deg from 12 o'clock
-  function drawSpeedGauge(lamp) {
+  function drawSpeedGauge(lamp) { drawSpeedFace(); drawSpeedLive(lamp); }
+  const speedTick = s => {                                 // [inner r, outer r, width] of the tick at s km/h
+    const major = s % 20 === 0, mid = s % 10 === 0, outer = SR - 8;
+    return [outer - (major ? 16 : (mid ? 10 : 6)), outer, major ? 3 : (mid ? 2 : 1.2)];
+  };
+  const tickSeg = (cx, cy, a, r0, r1, w, col) => [cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1, w, col];
+  // the parts that don't move: shade, face, track, unlit ticks, numbers (a static layer in Qt)
+  function drawSpeedFace() {
     ctx.save();
     const sh = ctx.createRadialGradient(SCX, SCY, SR, SCX, SCY, SR + 20);          // drop shade as a gradient, no blur
     sh.addColorStop(0, "rgba(0,0,0,0.55)"); sh.addColorStop(1, "rgba(0,0,0,0)");
@@ -590,23 +619,30 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     ctx.beginPath(); ctx.arc(SCX, SCY, SR - 2, toRad(sAng(0)), toRad(sAng(SMAX)));
     ctx.lineWidth = 2; ctx.strokeStyle = "#1a2028"; ctx.stroke();
 
-    const v = lamp ? SMAX : S.speed;
+    const segs = [];
     for (let s = 0; s <= SMAX; s += 5) {
-      const major = s % 20 === 0, mid = s % 10 === 0;
-      const lit = s <= v;
-      const outer = SR - 8, len = major ? 16 : (mid ? 10 : 6), a = toRad(sAng(s));
-      ctx.beginPath();
-      ctx.moveTo(SCX + Math.cos(a) * (outer - len), SCY + Math.sin(a) * (outer - len));
-      ctx.lineTo(SCX + Math.cos(a) * outer, SCY + Math.sin(a) * outer);
-      ctx.lineWidth = major ? 3 : (mid ? 2 : 1.2);
-      ctx.strokeStyle = lit ? TH.tick : "#262d35";
-      ctx.stroke();
-      if (major && s % 40 === 0) {
+      const [r0, r1, w] = speedTick(s), a = toRad(sAng(s));
+      segs.push(tickSeg(SCX, SCY, a, r0, r1, w, "#262d35"));
+      if (s % 40 === 0) {
         const lr = SR - 38;
         withNumFonts(nf => text(s, SCX + Math.cos(a) * lr, SCY + Math.sin(a) * lr, Math.round(15 * nf.size), "#c4ccd4",
              { align: "center", base: "middle", weight: nf.scale, family: nf.family }));
       }
     }
+    strokeBatch(segs);
+    ctx.beginPath(); ctx.arc(SCX, SCY, SR * 0.46, 0, Math.PI * 2);
+    ctx.fillStyle = "#0b0e12"; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = "#1c232b"; ctx.stroke();
+    text("km/h", SCX, SCY + 32, 11, "#7d8996", { align: "center", base: "alphabetic", ls: 1.5 });
+  }
+  // the parts that move: lit ticks (drawn over the unlit ones), needle, hub readout
+  function drawSpeedLive(lamp) {
+    const v = lamp ? SMAX : S.speed, segs = [];
+    for (let s = 0; s <= v && s <= SMAX; s += 5) {
+      const [r0, r1, w] = speedTick(s);
+      segs.push(tickSeg(SCX, SCY, toRad(sAng(s)), r0, r1, w, TH.tick));
+    }
+    strokeBatch(segs);
 
     // needle
     const na = toRad(sAng(v)), ca = Math.cos(na), sa = Math.sin(na);
@@ -617,15 +653,17 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     ctx.lineWidth = 3.5; ctx.strokeStyle = TH.needle; ctx.stroke();
     ctx.lineCap = "butt";
 
-    // digital readout in the hub
-    ctx.beginPath(); ctx.arc(SCX, SCY, SR * 0.46, 0, Math.PI * 2);
-    ctx.fillStyle = "#0b0e12"; ctx.fill();
-    ctx.lineWidth = 1; ctx.strokeStyle = "#1c232b"; ctx.stroke();
+    // digital readout in the hub (the hub disc is on the face; the needle stops short of it)
     withNumFonts(hf => text(Math.round(S.realSpeed || 0), SCX, SCY + 14, Math.round(46 * hf.size), "#f6f8fa",
          { weight: hf.hub, align: "center", base: "alphabetic", family: hf.family }));
-    text("km/h", SCX, SCY + 32, 11, "#7d8996", { align: "center", base: "alphabetic", ls: 1.5 });
   }
-  function drawDial(lamp) {
+  function drawDial(lamp) { drawDialFace(); drawDialLive(lamp); }
+  const dialTick = i => {                                  // [inner r, outer r, width] of tick i (one per 100 rpm)
+    const major = i % 10 === 0, half = i % 5 === 0, outer = DR - 12;
+    return [outer - (major ? 26 : (half ? 18 : 12)), outer, major ? 4 : (half ? 3 : 2)];
+  };
+  // the parts that don't move: halo, face, red band, unlit ticks, numbers (a static layer in Qt)
+  function drawDialFace() {
     // soft halo so the dial reads as the top layer
     ctx.save();
     const sh = ctx.createRadialGradient(DCX, DCY, DR, DCX, DCY, DR + 24);          // drop shade as a gradient, no blur
@@ -643,19 +681,13 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // red band
     ctx.beginPath(); ctx.arc(DCX, DCY, DR - 4, toRad(ang(REDLINE)), toRad(ang(MAXRPM)));
     glowStroke(TH.redband, 7, 10);
-    // ticks (one per 100 rpm across the whole dial)
+    // ticks (one per 100 rpm across the whole dial), unlit
+    const segs = [];
     for (let i = 0; i <= MAXRPM / 100; i++) {
-      const v = i * 100, major = i % 10 === 0, half = i % 5 === 0, red = v >= REDLINE;
-      const lit = lamp || v <= S.rpm;
-      const len = major ? 26 : (half ? 18 : 12);
-      const outer = DR - 12, inner = outer - len, a = toRad(ang(v));
-      ctx.beginPath();
-      ctx.moveTo(DCX + Math.cos(a) * inner, DCY + Math.sin(a) * inner);
-      ctx.lineTo(DCX + Math.cos(a) * outer, DCY + Math.sin(a) * outer);
-      ctx.lineWidth = major ? 4 : (half ? 3 : 2);
-      ctx.strokeStyle = lit ? (red ? "#ff2d3f" : TH.tick) : (red ? "#4a1218" : "#262d35");
-      ctx.stroke();
+      const [r0, r1, w] = dialTick(i);
+      segs.push(tickSeg(DCX, DCY, toRad(ang(i * 100)), r0, r1, w, i * 100 >= REDLINE ? "#4a1218" : "#262d35"));
     }
+    strokeBatch(segs);
 
     // numbers
     for (let n = 0; n <= MAXRPM / 1000; n++) {
@@ -663,6 +695,16 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       withNumFonts(nf => text(n, DCX + Math.sin(a) * r, DCY - Math.cos(a) * r, Math.round(34 * nf.size), n * 1000 >= REDLINE ? RED : "#e8ecf0",
            { weight: nf.dial, align: "center", base: "middle", family: nf.family }));
     }
+    text("x1000 r/min", DCX, DCY + 40, 10, "#3d4651", { align: "center", ls: 1.5 });
+  }
+  // the parts that move: lit ticks (drawn over the unlit ones), needle, Eco band
+  function drawDialLive(lamp) {
+    const segs = [];
+    for (let i = 0; i <= MAXRPM / 100 && (lamp || i * 100 <= S.rpm); i++) {
+      const [r0, r1, w] = dialTick(i);
+      segs.push(tickSeg(DCX, DCY, toRad(ang(i * 100)), r0, r1, w, i * 100 >= REDLINE ? "#ff2d3f" : TH.tick));
+    }
+    strokeBatch(segs);
     // needle
     {
       const na = toRad(ang(S.rpm)), ca = Math.cos(na), sa = Math.sin(na);
@@ -673,7 +715,6 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       g.addColorStop(0, TH.needle); g.addColorStop(1, rgba(TH.needle, 0.5));
       seg(DR - 10, DR - 8 - DR * 0.48); ctx.lineWidth = 4; ctx.strokeStyle = g; ctx.stroke();
       ctx.lineCap = "butt";
-      text("x1000 r/min", DCX, DCY + 40, 10, "#3d4651", { align: "center", ls: 1.5 });
     }
 
     // ECO: shift-early band on the track
@@ -1137,7 +1178,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       else { ctx.lineWidth = 1.2; ctx.strokeStyle = "#4a545e"; ctx.stroke(); }
       text(badge, X + 8, top + 6.5, 9, active ? "#ffffff" : "#7d8996", { weight: 700, align: "center", base: "middle" });
       text("TRIP", X + 24, top + 6.5, 8, "#5d6873", { base: "middle", ls: 1.5 });
-      const v = km.toLocaleString("en-CA", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      const v = fmtNum(km, 1);
       const fs = active ? 22 : 18;
       text(v, X, top + 38, fs, active ? "#f2f4f7" : "#aab4be", { weight: 300, base: "alphabetic" });
       text("km", X + measure(v, fs, 300) + 4, top + 38, 9, "#5d6873", { base: "alphabetic" });
@@ -1325,7 +1366,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     text("ECONOMY", x, by0 + 2, 9, "#7d8996", { ls: 2 });
     // rpm readout: exact at a standstill (idle), rounded to the hundred while driving so it doesn't flicker
     const rpmNow = f * REDLINE, stopped = (S.realSpeed || 0) < 1;
-    const rpmShown = (stopped ? Math.round(rpmNow) : Math.round(rpmNow / 100) * 100).toLocaleString("en-CA");
+    const rpmShown = fmtNum(stopped ? Math.round(rpmNow) : Math.round(rpmNow / 100) * 100);
     text(rpmShown, x - 2, 262, 38, "#f2f4f7", { weight: 500, base: "alphabetic", family: NUMFONTS.eco.family });
     text("RPM", x, 276, 8, "#5d6873", { ls: 1.5 });
     // live consumption: L/100 km while moving, L/h when stopped
@@ -1865,8 +1906,15 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   // Qt build: these three layers are separate GPU items (see qt/main.qml); draw() then only paints the live parts.
   let LAYERED = false;
+  // Sections: live parts that only change when their inputs (deps) do. The web draws them straight
+  // away. Qt gives each its own canvas and repaints it only when the deps, the theme or its
+  // position/opacity change, so a parked car doesn't redraw every gauge every frame.
+  // deps must cover everything the section's drawing reads (rounded to what is visible).
+  let sectionHook = null, frameSig = null;
+  function section(name, deps, fn) { if (sectionHook) sectionHook(name, deps, fn, ctx, frameSig); else fn(); }
   function draw() {
     const lamp = A.lamps;
+    if (sectionHook) frameSig = [modeK, ecoA, sportA, TH.accent, TH.tick, TH.needle, TH.redband, TH.car];
     ctx.globalAlpha = 1;
     if (LAYERED) ctx.clearRect(0, 0, W, H);
     else { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H); }
@@ -1892,36 +1940,53 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     ctx.save(); enterGroup();
     // ---------- speedometer (under the tach, or on top of it once Eco is past halfway) ----------
     const notSport = SPX.other, sportIn = SPX.sport;
-    const speedo = () => withTf(A.gauges * notSport, otherTf, () => atPose(placed("speed"), SCX, SCY, () => drawSpeedGauge(false)));
+    const speedo = () => withTf(A.gauges * notSport, otherTf, () => atPose(placed("speed"), SCX, SCY,
+      () => { section("speedFace", [], drawSpeedFace);
+              section("speed", [Math.round(S.speed * 20), Math.round(S.realSpeed || 0)], () => drawSpeedLive(false)); }));
     if (ecoA <= 0.5) speedo();
 
     // ---------- dash: side content ----------
     withTf(A.dash * notSport, otherTf, () => {
       // ---------- LEFT: trip section ----------
       // Everything here is counted on the device from speed and time.
-      drawTrips();
-      if (ecoA > 0.01) withAlpha(ecoA, drawEconomy);
+      const avg = S.tripTime > 30 ? Math.round(S.tripDist / (S.tripTime / 3600)) : -1;
+      section("trips", [S.tripA.toFixed(1), S.tripB.toFixed(1), S.tripDist.toFixed(1), fmtTime(S.tripTime), avg,
+                        S.avgL100 === null ? "" : S.avgL100.toFixed(1)], drawTrips);
+      // economy eases its bar toward the rpm and fades the leaf inside drawEconomy, so those are deps too
+      if (ecoA > 0.01) withAlpha(ecoA, () => section("economy", [Math.round(S.rpm / 5), Math.round(econShown * 2000), leafK,
+        (S.realSpeed || 0) < 1, S.l100 === null ? "" : S.l100.toFixed(1), S.lph.toFixed(1)], drawEconomy));
 
       const normalA = Math.max(0, 1 - ecoA - (SPX.active ? 0 : sportA));   // during a Sport switch the whole layer fades as one
       text("VEHICLE STATUS", lerp(NROAD.cx, CAR.x, ecoA), 62, 11, "#7d8996", { ls: 3, align: "center" });
-      if (ecoA > 0.01) withAlpha(ecoA, drawCarStatus);
-      if (normalA > 0.01) withAlpha(normalA, drawNormalVehicle);
+      if (ecoA > 0.01) withAlpha(ecoA, () => {
+        const hot = S.coolant > HOT_TEMP, moving = (S.realSpeed || 0) > 0;   // lanes and airflow scroll while moving
+        section("car", [moving || hot ? performance.now() : 0, chargeK, Math.round(S.coolant)], drawCarStatus);
+      });
+      if (normalA > 0.01) withAlpha(normalA, () => {
+        const hot = S.coolant > HOT_TEMP;          // hot: the glow pulses, so it redraws every frame
+        section("vehicle", [roadZ, chargeK, brakeK, Math.round(S.coolant), hot ? performance.now() : 0], drawNormalVehicle);
+      });
 
       // rings: sweep to full, then settle on the real value
       const ring = (min, max, real) => A.miniDown > 0 ? lerp(max, real, A.miniDown) : lerp(min, max, A.miniUp);
       const E = ecoA;                                   // Normal: rings in a column; Eco: chevron round the car
-      miniGauge({ cx: 1158, cy: lerp(100, 116, E), r: 46, min: COOLANT_MIN, max: COOLANT_MAX, value: ring(COOLANT_MIN, COOLANT_MAX, S.coolant),
-                  label: "COOLANT", unit: "°C", digits: 0, warnFrom: HOT_TEMP, warnTo: COOLANT_MAX, warnColor: RED });
-      const fx = lerp(1158, 1050, E), fy = lerp(222, 228, E);
-      miniGauge({ cx: fx, cy: fy, r: 46, min: 0, max: 1, value: ring(0, 1, S.fuel),
-                  label: "FUEL EST", unit: "%", digits: 0, warnFrom: 0, warnTo: 0.12, warnColor: "#ffb020", _pct: true });
-      text(Math.round(S.range) + " km range", fx, fy + 61, 9, "#7d8996", { align: "center", base: "middle", ls: 1 });
-      miniGauge({ cx: 1158, cy: lerp(344, 340, E), r: 46, min: -30, max: 60, value: ring(-30, 60, S.intakeTemp),
-                  label: "INTAKE", unit: "°C", digits: 0, tint: "#9cc6ff" });
+      const rc = ring(COOLANT_MIN, COOLANT_MAX, S.coolant), rf = ring(0, 1, S.fuel), ri = ring(-30, 60, S.intakeTemp);
+      section("rings", [Math.round(rc * 10), Math.round(rf * 1000), Math.round(ri * 10), Math.round(S.range)], () => {
+        miniGauge({ cx: 1158, cy: lerp(100, 116, E), r: 46, min: COOLANT_MIN, max: COOLANT_MAX, value: rc,
+                    label: "COOLANT", unit: "°C", digits: 0, warnFrom: HOT_TEMP, warnTo: COOLANT_MAX, warnColor: RED });
+        const fx = lerp(1158, 1050, E), fy = lerp(222, 228, E);
+        miniGauge({ cx: fx, cy: fy, r: 46, min: 0, max: 1, value: rf,
+                    label: "FUEL EST", unit: "%", digits: 0, warnFrom: 0, warnTo: 0.12, warnColor: "#ffb020", _pct: true });
+        text(Math.round(S.range) + " km range", fx, fy + 61, 9, "#7d8996", { align: "center", base: "middle", ls: 1 });
+        miniGauge({ cx: 1158, cy: lerp(344, 340, E), r: 46, min: -30, max: 60, value: ri,
+                    label: "INTAKE", unit: "°C", digits: 0, tint: "#9cc6ff" });
+      });
     });
 
     // ---------- tachometer (fades out in Eco) ----------
-    withTf(A.gauges * (1 - ecoA) * notSport, otherTf, () => atPose(placed("tach"), DCX, DCY, () => drawDial(false)));
+    withTf(A.gauges * (1 - ecoA) * notSport, otherTf, () => atPose(placed("tach"), DCX, DCY,
+      () => { section("tachFace", [], drawDialFace);
+              section("tach", [Math.round(S.rpm / 5), into("eco", 0.8)], () => drawDialLive(false)); }));
 
     // ---------- Sport layout (live parts) ----------
     if (sportIn > 0.002) {
@@ -1959,7 +2024,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     withAlpha(A.dash, () => {
 
       const by = BT + 5;
-      drawLamps(lamp);
+      section("lamps", [lamp, ENGINE.state, ...LAMPS.map(L => L.on() ? L.col() : "")], () => drawLamps(lamp));
       // engine just started: a light runs out along the far edge of the floor from the centre
       if (ENGINE.runFx < 1.4) {
         const p = ENGINE.runFx / 1.4, e = easeOut(p);
@@ -2276,7 +2341,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   });
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
   if (typeof __exportCluster === "function") __exportCluster({
-    step, draw, drawTop, topActive, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
+    setSectionHook: f => { sectionHook = f; }, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));
