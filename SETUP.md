@@ -142,14 +142,31 @@ git clone https://github.com/abdul-dev06/digital_dashboard_project.git ~/dashboa
 sh ~/dashboard/qt/run.sh
 ```
 
-Sounds (start-up and warning chimes), once:
+Sounds (start-up and warning chimes), once. These are the steps that worked on 2026-10-18:
 ```
 sudo apt install --no-install-recommends qml6-module-qtmultimedia pipewire-pulse wireplumber
 sudo reboot
 ```
-- Without these, the cluster still runs, just silently. The console says "Sounds off".
-- The sound goes out over HDMI to the TV, or to the 3.5 mm jack, whichever is the default output.
-- To list the outputs: `wpctl status`. To pick one: `wpctl set-default <number>`, using the number next to the HDMI or analog sink.
+Then log in and point the sound at HDMI. The two outputs both show as "Built-in Audio" until you add `-n`:
+```
+wpctl status -n                 # under Audio > Sinks: alsa_output.platform-hdmi-sound... = the TV
+wpctl set-default 35            # use that line's number (it was 35)
+wpctl set-volume 35 1.0         # it starts at 40 %
+pw-play /usr/share/sounds/alsa/Front_Center.wav   # test: a voice from the TV
+```
+- The default is remembered across reboots.
+- For the car's 3.5 mm jack instead, pick the `analog-sound` sink.
+- Without the module, the cluster still runs silently, and its console says "Sounds off".
+- Gotchas:
+  - Right after installing, the cluster says "pa_context_connect() failed / No audio device detected". The sound service only starts at login, so reboot first.
+  - The `RTKit error` lines and the red `mp3float … timestamps` lines are harmless.
+  - To test the hardware without PipeWire:
+    ```
+    systemctl --user stop pipewire.socket pipewire-pulse.socket pipewire pipewire-pulse wireplumber
+    speaker-test -D plughw:1,0 -c 2 -t sine -l 1
+    systemctl --user start pipewire.socket pipewire-pulse.socket pipewire pipewire-pulse wireplumber
+    ```
+    In `speaker-test`, card 1 is HDMI and card 0 is analog. Mind the dash in `-D` and the lack of a space in `plughw:1,0`.
 
 Every time after:
 - `sh ~/dashboard/qt/run.sh` pulls the latest version from GitHub (15 s limit, skipped when offline), then starts the app.
