@@ -229,6 +229,46 @@ Also available but unused: absolute load (43), relative throttle (45), barometri
 - **Toy values (web only):** λ 0.86 under hard load else 1.00; timing rises with rpm; cat temps chase 360 + load×4 + rpm/18 (cat 2 lags, ~70° cooler).
 - **Shift detection (`detectShift`):** sample rpm + speed at `traceHz`. Ratio = rpm ÷ speed. A shift = ratio changes by more than `shiftStep` (18%) versus 0.6 s earlier, both samples above `shiftMinSpeed`, rpm above idle + 250, and the new ratio steady (±5%) for 0.2 s. Max one per second. Ratio drop = upshift, rise = downshift/kickdown. Needs ~10 Hz rpm+speed (CAN + USB adapter). Future: learn the 4 gear ratios over a few drives to label gears.
 
+### Reading the car: Tactrix OpenPort 2.0 (`obd/reader.py`)
+- **Adapter:** Abdul's Tactrix OpenPort 2.0 (USB, J2534) replaces the ELM327 plan. On Linux it is a CDC-ACM serial device (`/dev/ttyACM0`, needs the `dialout` group) that takes text commands (`at<verb><ch> <args> <seq>`) plus binary payloads and answers `ar…` text replies and binary frames. It does ISO-TP itself. Protocol reference: github.com/bisak/openport-j2534 `docs/PROTOCOL.md`.
+- **The reader** is plain Python (standard library only):
+  1. It opens ISO 15765 (`ato6 0 500000 0`) and sets a flow-control filter, 7E8 replies with flow control to 7E0, so multi-frame replies work.
+  2. It sends padded mode-01 requests to the engine ECU at 7E0, physical addressing, so the gearbox at 7E9 stays quiet.
+  3. Up to 6 PIDs go in one request. If the ECU answers only the first PID, that group falls back to one PID per request.
+  4. It reads battery voltage from OBD pin 16 through the cable (`atr 16`), with no ECU traffic.
+- **Polling:**
+
+  | Values | How often |
+  |---|---|
+  | rpm + speed | every cycle |
+  | MAF + λ | 2 Hz |
+  | coolant, load, timing, throttle, run time, MIL | 1 Hz |
+  | intake + ambient | every 5 s |
+  | battery | 1 Hz |
+
+- **Output:** the reader writes the latest values atomically to `/dev/shm/cluster-obd.json` (RAM, no SD wear), at most 30 times a second, with a `mode`:
+
+  | Mode | Meaning |
+  |---|---|
+  | `live` | the ECU is answering |
+  | `noecu` | the cable is there, the ECU is silent |
+  | `demo` | no cable |
+  | `sim` | `--sim`, made-up driving data |
+
+- **Dashboard:** `qt/main.qml` reads the file every 50 ms (`QML_XHR_ALLOW_FILE_READ=1`) and calls `feed()`. In `live`/`sim` mode, `liveStep()` replaces the toy:
+  - needles ease toward each reading (`CFG.liveEase` 70 ms);
+  - trips integrate the real speed;
+  - the sensors are copied in;
+  - drive time = ECU run time (PID 1F);
+  - the OBD link lamp lights after `CFG.liveStale` (2 s) without data.
+  
+  `noecu` keeps the demo but lights the link lamp.
+- **Lifecycle:** `qt/run.sh` starts the reader (`CLUSTER_OBD=sim` for made-up data, `off` for none) and stops it when the cluster quits. The reader also exits if its parent dies.
+- **Testing:**
+  - `obd/fake_openport.py` emulates the cable and an ECU on a pseudo-terminal; options `--no-multi` and `--silent`.
+  - Against it: about 115 replies/s with an 8 ms simulated round trip, the multi-PID fallback, `noecu`, and the full path into the dashboard.
+- **CPU:** a few percent of one core; the dashboard cost is unchanged.
+
 **Polling plan (CAN + USB adapter ≈ 80+ replies/s):** rpm + speed every cycle (~20 Hz each); MAF ~2 Hz; commanded λ ~1 Hz; coolant, voltage, MIL, run time ~1 Hz; intake/ambient every few seconds. Needles still ease between readings.
 
 ---

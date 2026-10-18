@@ -403,7 +403,9 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     coldLampOff: 50,          // °C: blue coolant lamp goes out above this
     lowVolts: 12.2,           // running below this for 5 s = charging fault (battery lamp + alert)
     lowFuel: 0.12,            // fuel lamp at/below this fraction of the tank
-    iceTemp: 3                // °C: ice warning lamp at/below this outside temperature
+    iceTemp: 3,               // °C: ice warning lamp at/below this outside temperature
+    liveStale: 2,             // s without fresh OBD data = OBD link lamp (live data, Qt build)
+    liveEase: 0.07            // s: needles glide toward each new OBD reading (readings come ~20x a second)
   };
   const REDLINE = CFG.redline;
   const MAXRPM = Math.ceil(REDLINE / 1000 + 1) * 1000;   // dial runs at least 1000 rpm past redline
@@ -2453,6 +2455,32 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   let start = null, looping = false, powered = false, lastTs = 0;
   let redK = 0, logoT = 0, logoMoving = false, perfMs = 0, perfShown = 0;
+  // ================= Live data (OBD2) =================
+  // The Qt build reads obd/reader.py's output and calls feed() ~20x a second. mode "live" or "sim":
+  // real values drive the cluster instead of the toy. "noecu": cable but no answer (link lamp on,
+  // toy stays). "demo" (no cable) and the web prototype: the toy, driven by the keyboard.
+  const LIVE = { on: false, at: 0, v: {} };
+  function feed(m) {
+    if (!m) return;
+    const live = m.mode === "live" || m.mode === "sim";
+    if (live) { LIVE.v = m; LIVE.at = performance.now() / 1000; }
+    if (live !== LIVE.on) { LIVE.on = live; D.gas = false; if (live) D.engine = "off"; }
+    if (!live) S.obdLink = m.mode !== "noecu";
+  }
+  function liveStep(dt) {
+    const v = LIVE.v, fresh = performance.now() / 1000 - LIVE.at < CFG.liveStale;
+    S.obdLink = fresh;
+    const ease = 1 - Math.exp(-dt / CFG.liveEase);
+    const tr = fresh ? (v.rpm || 0) : 0, ts = fresh ? (v.speed || 0) : 0;
+    D.rpm += (tr - D.rpm) * ease;
+    D.speed += (ts - D.speed) * ease;
+    D.engine = D.rpm >= CFG.runRpm ? "run" : D.rpm >= CFG.offRpm ? "crank" : "off";
+    const km = D.speed / 3600 * dt; S.tripA += km; S.tripB += km; S.tripDist += km;
+    for (const k of ["coolant", "intakeTemp", "outsideTemp", "maf", "lambda", "engineLoad", "timing", "throttle", "batteryVolts", "checkEngine"])
+      if (v[k] !== undefined) S[k] = v[k];
+    if (v.runTime !== undefined) S.tripTime = v.runTime;            // ECU run time since engine start (PID 1F)
+    if (!fresh) { S.maf = 0; S.engineLoad = 0; }
+  }
   function step(ts) {
     if (start === null) start = ts;
     const intro = !powered && animate((ts - start) / 1000);
@@ -2461,14 +2489,18 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016; lastTs = ts;
     let moving = false;
     if (powered) {
-      engineToy(dt);
-      moving = D.engine === "crank" || D.flare > 0 || D.gas || D.speed > 0.05 || (D.engine === "off" ? D.rpm > 0 : Math.abs(D.rpm - idleRpm()) > 2);
+      if (LIVE.on) { liveStep(dt); moving = true; }
+      else {
+        engineToy(dt);
+        moving = D.engine === "crank" || D.flare > 0 || D.gas || D.speed > 0.05 || (D.engine === "off" ? D.rpm > 0 : Math.abs(D.rpm - idleRpm()) > 2);
+      }
       if (testStep(dt)) moving = true;
       S.speed = D.speed; S.realSpeed = D.speed;
       updateEngine(dt, D.rpm);                                   // in the car: the polled rpm (PID 0C)
       if (ENGINE.runFx < 1.5 || ENGINE.lowVoltT > 0) moving = true;
       S.rpm = D.rpm + (MODE.to === "sport" && MT < 0.75 && ENGINE.state === "running" ? 0.5 * REDLINE * Math.sin(Math.PI * MT / 0.75) : 0);
-      toySensors(dt); updateDerived(dt); roadUpdate(dt); traceUpdate(dt); econUpdate(dt);
+      if (!LIVE.on) toySensors(dt);
+      updateDerived(dt); roadUpdate(dt); traceUpdate(dt); econUpdate(dt);
     }
     currentAlert = updateAlerts(ts / 1000);
     if (currentAlert || ALERTS.some(a => a.active)) moving = true;
@@ -2570,7 +2602,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const WARM = { saved: null };
   if (typeof __exportCluster === "function") __exportCluster({
     step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
-    setSectionHook: f => { sectionHook = f; }, liveSig, setMode, mode: () => MODE.to, startChime,
+    setSectionHook: f => { sectionHook = f; }, liveSig, setMode, mode: () => MODE.to, startChime, feed,
     // Qt start-up: draw() with the intro state at its end (everything shown, in place), so every
     // layer can be drawn once behind a black screen before the logo starts. warm(false) restores it.
     warm: on => {

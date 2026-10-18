@@ -15,6 +15,10 @@
 #   CLUSTER_SCALE=1.5        draw at 1920x720 (12.3" automotive panel resolution)
 #   CLUSTER_MODE=preferred   use the screen's own mode       (default 1280x720)
 #
+# Live data: obd/reader.py runs alongside and reads the car through a Tactrix OpenPort 2.0 (USB).
+# Without the cable the cluster runs its keyboard demo. CLUSTER_OBD=sim feeds made-up driving data
+# (tests the whole path without a car); CLUSTER_OBD=off doesn't start the reader.
+#
 # Keys (Rock64 keyboard): K key on, E engine, Space rev, arrows shift, 1/2/3 modes,
 #   C cold, H overheat, M check engine, F filled up, I icy, L OBD lost, P fps counter, Esc quit.
 # Over SSH, Ctrl+C in the SSH window also quits.
@@ -41,4 +45,14 @@ printf '{ "hwcursor": false, "outputs": [ { "name": "HDMI1", "mode": "%s" }, { "
 export QT_QPA_EGLFS_KMS_CONFIG="$KMS"
 export QT_SCALE_FACTOR="${CLUSTER_SCALE:-0.75}"
 echo "Screen mode: $MODE, cluster drawn at ${QT_SCALE_FACTOR}x  (Esc quits)"
-exec /usr/lib/qt6/bin/qml main.qml
+export QML_XHR_ALLOW_FILE_READ=1
+rm -f /dev/shm/cluster-obd.json
+READER=""
+case "${CLUSTER_OBD:-on}" in
+  off) ;;
+  sim) python3 "$REPO/obd/reader.py" --sim & READER=$! ;;
+  *)   python3 "$REPO/obd/reader.py" & READER=$! ;;
+esac
+/usr/lib/qt6/bin/qml main.qml
+[ -n "$READER" ] && kill "$READER" 2>/dev/null
+exit 0

@@ -189,6 +189,30 @@ Using it:
 
 - Over SSH, Ctrl+C also quits.
 
+## 8. Live data: Tactrix OpenPort 2.0
+
+Once, so the cluster can use the cable:
+```
+sudo usermod -aG dialout abdul        # then log out and back in
+```
+
+Testing at home:
+- **Made-up data, no cable needed:**
+  ```
+  CLUSTER_OBD=sim sh ~/dashboard/qt/run.sh
+  ```
+  Press P: it shows "data: sim" and the gauges drive by themselves.
+- **The cable at home (no car):** plug it into the Rock64 and run `sh ~/dashboard/qt/run.sh`.
+  - P should show "data: noecu" (the cable answers, there is no car) and the OBD lamp lights.
+  - Without the cable it shows "data: demo" and the keys drive it as before.
+- **Reader on its own, with a log:**
+  ```
+  python3 ~/dashboard/obd/reader.py -v
+  ```
+  It prints the cable's firmware, then the replies per second once it's in a car. Ctrl+C stops it.
+
+In the car: OBD port → OpenPort → Rock64 USB, then key on and run the cluster. P shows "data: live" once the ECU answers.
+
 ## Still to do
 
 - New 16–32 GB card, then redo steps 1–4. A one-command setup script is planned.

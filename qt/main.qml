@@ -229,7 +229,7 @@ Window {
             Text {
                 z: 40; visible: win.showFps
                 x: 8; y: 4; color: "#7d8996"; font.pixelSize: 12
-                text: win.fps.toFixed(0) + " fps  ·  " + win.jsShown.toFixed(1) + " ms code"
+                text: win.fps.toFixed(0) + " fps  ·  " + win.jsShown.toFixed(1) + " ms code  ·  data: " + win.obdMode
             }
 
             // ---- keyboard: same key codes as the browser version ----
@@ -262,6 +262,21 @@ Window {
                 var code = codeOf(e);
                 if (code) { C.__key("keyup", code, false); e.accepted = true; }
             }
+        }
+    }
+    // ---- live data: obd/reader.py writes the latest OBD2 values to a file in RAM; read it 20x a second ----
+    // (run.sh starts the reader and allows QML to read local files: QML_XHR_ALLOW_FILE_READ=1)
+    property string obdMode: "demo"
+    Timer {
+        interval: 50; repeat: true; running: win.ready
+        onTriggered: {
+            var x = new XMLHttpRequest();
+            x.onreadystatechange = function () {
+                if (x.readyState !== XMLHttpRequest.DONE || !x.responseText) return;
+                try { var m = JSON.parse(x.responseText); api.feed(m); win.obdMode = m.mode; } catch (e) {}
+            };
+            x.open("GET", "file:///dev/shm/cluster-obd.json");
+            x.send();
         }
     }
     // logos: loaded once at start-up and kept in Qt's image cache for the Image items above
