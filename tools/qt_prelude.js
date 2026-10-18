@@ -225,18 +225,23 @@ function __secEndFrame() {          // sections not drawn this frame (faded out,
   }
   __secFrame++;
 }
-function __secPaint(name, c, api) {
-  var s = __secs[name];
-  c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.clearRect(0, 0, 1280, 480);
+function __secPaint(name, c, api, ox, oy, w, h) {   // the canvas covers (ox, oy, w, h) of the screen
+  var s = __secs[name], drew = false;
+  c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.clearRect(0, 0, w, h);
   __beginLive(c);
   if (s && s.fn) {
     api.setCtx(c);
     var m = s.m;
-    __M_save(c); __M_setTransform(c, m[0], m[1], m[2], m[3], m[4], m[5]); c.globalAlpha = s.a;
+    __M_save(c);
+    c.setTransform(m[0], m[1], m[2], m[3], m[4] - ox, m[5] - oy);   // canvas is offset; the text positions are not
+    __m = m.slice();
+    c.globalAlpha = s.a;
     s.fn();
     __M_restore(c);
+    drew = true;
   }
   __applyTexts(name, __endLive());
+  return drew;
 }
 
 function __setTexUrl(u) { __texUrl = u; }

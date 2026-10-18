@@ -117,25 +117,31 @@ Window {
         // ---- sections: each repainted only when what it shows changes ----
         Repeater {
             id: sections
-            model: [ { name: "speedFace", z: 2.5 }, { name: "speed", z: 3 }, { name: "tachFace", z: 4.5 }, { name: "trips", z: 4 }, { name: "economy", z: 4 }, { name: "car", z: 4 },
-                     { name: "vehicle", z: 4 }, { name: "rings", z: 4 },
-                     { name: "tach", z: 5 }, { name: "lamps", z: 6 } ]
+            // r: the screen area each one can reach in any mode (x, y, w, h). Canvases are only as big
+            // as that, and hidden while empty, so the GPU paints as few pixels as possible.
+            model: [ { name: "speedFace", z: 2.5, r: [0, 0, 1280, 480] },   { name: "speed", z: 3, r: [0, 0, 1280, 480] },
+                     { name: "trips",     z: 4,   r: [0, 0, 420, 445] },    { name: "economy", z: 4, r: [170, 0, 320, 445] },
+                     { name: "car",       z: 4,   r: [720, 0, 440, 445] },  { name: "vehicle", z: 4, r: [740, 0, 440, 445] },
+                     { name: "rings",     z: 4,   r: [880, 0, 400, 445] },  { name: "tachFace", z: 4.5, r: [180, 0, 920, 480] },
+                     { name: "tach",      z: 5,   r: [180, 0, 920, 480] },  { name: "lamps", z: 6, r: [0, 420, 1280, 60] } ]
             delegate: Item {
                 required property var modelData
                 readonly property string name: modelData.name
                 property alias canvas: cv
                 property alias texts: tx
+                property bool on: false            // set after each paint: false = nothing drawn, so hide it
                 anchors.fill: parent
                 // the speedometer goes on top of the tach once Eco is past halfway
                 z: (name === "speed" || name === "speedFace") ? (win.frameNo, modelData.z + (api.speedOnTop() ? 4 : 0)) : modelData.z
                 Canvas {
                     id: cv
-                    anchors.fill: parent
+                    x: modelData.r[0]; y: modelData.r[1]; width: modelData.r[2]; height: modelData.r[3]
+                    opacity: parent.on ? 1 : 0
                     renderStrategy: Canvas.Threaded
-                    Component.onCompleted: loadImage(Qt.resolvedUrl("texture.png"))
                     onPaint: {
                         var t0 = Date.now(), c = getContext("2d");
-                        C.__setMeasureCtx(c); C.__secPaint(parent.name, c, api);
+                        C.__setMeasureCtx(c);
+                        parent.on = C.__secPaint(parent.name, c, api, x, y, width, height);
                         win.jsMs += Date.now() - t0;
                     }
                 }
@@ -171,6 +177,7 @@ Window {
             id: top
             anchors.fill: parent
             z: 12
+            opacity: win.topWas ? 1 : 0          // hidden (not painted by the GPU) while there's no popup/logo
             renderStrategy: Canvas.Threaded
             onPaint: {
                 var c = getContext("2d");

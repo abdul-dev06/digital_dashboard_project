@@ -145,6 +145,7 @@ sh ~/dashboard/qt/run.sh
 Every time after:
 - `sh ~/dashboard/qt/run.sh` pulls the latest version from GitHub (15 s limit, skipped when offline), then starts the app.
 - `--no-update` skips the check.
+- The HDMI output is set to 1280x720, whatever the screen (a 4K TV made the GPU the bottleneck). `CLUSTER_MODE=1920x1080 sh ~/dashboard/qt/run.sh` picks another mode; `CLUSTER_MODE=preferred` uses the screen's own.
 
 Using it:
 - Keys are typed on the **Rock64's keyboard**:
