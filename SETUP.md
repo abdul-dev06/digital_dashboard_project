@@ -142,6 +142,15 @@ git clone https://github.com/abdul-dev06/digital_dashboard_project.git ~/dashboa
 sh ~/dashboard/qt/run.sh
 ```
 
+Sounds (start-up and warning chimes), once:
+```
+sudo apt install --no-install-recommends qml6-module-qtmultimedia pipewire-pulse wireplumber
+sudo reboot
+```
+- Without these, the cluster still runs, just silently. The console says "Sounds off".
+- The sound goes out over HDMI to the TV, or to the 3.5 mm jack, whichever is the default output.
+- To list the outputs: `wpctl status`. To pick one: `wpctl set-default <number>`, using the number next to the HDMI or analog sink.
+
 Every time after:
 - `sh ~/dashboard/qt/run.sh` pulls the latest version from GitHub (15 s limit, skipped when offline), then starts the app.
 - `--no-update` skips the check.

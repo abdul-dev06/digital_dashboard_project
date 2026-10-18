@@ -57,6 +57,19 @@ Everything is drawn on one canvas in a fixed 1280×480 coordinate space, scaled 
 - Gauges are split into a face (`drawSpeedFace`, `drawDialFace`: shade, unlit ticks, numbers, hub) and a live part (`drawSpeedLive`, `drawDialLive`: lit ticks drawn over the unlit ones, needle, readout). Ticks and ring segments are stroked in batches, one stroke per width and colour (`strokeBatch`).
 - **Sections move and fade on the GPU:** a section's opacity is its item's opacity (never a repaint), and when only its position/size changes (e.g. the intro's gauge move) the existing picture is moved by a GPU transform and repainted sharp once it stops moving. Sections that aren't drawn in a frame are hidden, not cleared, so they come back without a repaint. Their canvases only resize when the content no longer fits.
 - **Start-up:** before the intro, every layer is drawn once behind a black cover: background, all chrome pieces (kept visible at opacity 0 so they paint), and every section as it looks at the end of the intro (`warm(true)` sets the intro state `A` to its end values). When all have reported `painted` (3 s cap), the cover goes and the intro (logo) starts, so nothing pops in late.
+- **Logos and sounds** live in `assets/`:
+
+  | File | Use |
+  |---|---|
+  | `logo.png` | start-up and Sport |
+  | `logo-redline.png` | Sport at redline |
+  | `start.mp3` | power-on chime, with the logo; also on K |
+  | `alert.mp3` | every warning |
+
+  - `port_qt.py` prepares them into `qt/assets/`, the same way the web's `prepareLogo` does: 360 px on the long side, and the dark background keyed out unless the file is already transparent. It also makes a red silhouette for the redline flash, because Qt's canvas can't tint offscreen. It writes a manifest into the prelude (`__ASSETS`).
+  - In the Qt build, `logoImg`/`logoRedImg` come from `__logo()`, and `tinted()` returns the pre-made red version.
+  - Sounds play through `qt/Sounds.qml` (QtMultimedia `MediaPlayer`). It is loaded by a `Loader`, so a Rock64 without the sound module runs silently instead of failing.
+  - The web prototype still takes logos and sounds through its own pickers. The published prototype carries no brand logos.
 - **Mode changes on the Rock64 are a plain fade** (`modeFade` in `main.qml`): the view dips to black (160 ms), `setMode(m, true)` switches instantly while dark (the one heavy repaint is hidden), then it fades back in (220 ms). Only the GPU works during it. The morph (theme blend, Eco pose slide, Sport slide/zoom, light ring, numeral cross-fade) made every layer repaint every frame for 0.6–0.85 s, about 3–5x the normal cost. The web prototype keeps the full animation; the start-up animation is the same on both. Anything a section's drawing eases over time must be advanced in `step()` (e.g. `econUpdate`), not inside the drawing, or it freezes when the section stops repainting.
 - Code time per frame on a PC, Qt 6.8.2: parked at idle 0.4 ms (was 14 ms at the start of the day), driving about 1.2 ms, the first moments of a mode switch about 2.5 ms (everything repaints while it moves).
 - **GPU fill rate is the other limit** (Mali-450): every visible layer is a transparent texture the GPU paints over the whole output. On a 4K TV every mode ran at the same low fps whatever the code time, so `qt/run.sh` forces the HDMI output to 1280x720 through `QT_QPA_EGLFS_KMS_CONFIG` (`CLUSTER_MODE` overrides it) and sets `QT_SCALE_FACTOR=0.75` (`CLUSTER_SCALE`): the 1280x480 layout is rendered at 960x360 real pixels (canvases and text render at the device pixel ratio). Tried on the Rock64: 1920x720 (1.5x) was too heavy, 1280x480 (1x) good, 0.75x is the default for headroom.

@@ -50,6 +50,12 @@ Window {
     FontLoader { source: "fonts/Michroma-Regular.ttf" }
 
     Component.onCompleted: {
+        // logos (qt/assets): every canvas that can draw one loads the images once
+        C.__setAssetBase(Qt.resolvedUrl("assets/").toString());
+        var urls = C.__assetUrls(), cvs = [top, live];
+        for (var ci = 0; ci < sections.count; ci++) cvs.push(sections.itemAt(ci).canvas);
+        for (var k = 0; k < cvs.length; k++) for (var ui = 0; ui < urls.length; ui++) cvs[k].loadImage(urls[ui]);
+        C.__setSoundHook(function (name) { if (sounds.item) sounds.item.play(name); });
         api.setLayered(true);
         api.setSectionHook(C.__secHook);
         for (var si = 0; si < sections.count; si++) {
@@ -163,6 +169,7 @@ Window {
                             win.jsMs += Date.now() - t0;
                         }
                         onPainted: C.__secDone(parent.name)
+                    onImageLoaded: if (parent.on) requestPaint()
                     }
                     Repeater { id: tx; model: 40; delegate: liveText }
                 }
@@ -264,6 +271,13 @@ Window {
             }
         }
     }
+    // chimes: optional (needs Qt's sound module); without it the cluster just runs silent
+    Loader {
+        id: sounds
+        source: "Sounds.qml"
+        onLoaded: item.base = Qt.resolvedUrl("assets/")
+        onStatusChanged: if (status === Loader.Error) console.log("Sounds off: install qml6-module-qtmultimedia for the chimes")
+    }
     Rectangle {                                    // start-up cover (see win.ready)
         anchors.fill: parent; color: "black"; z: 100
         visible: !win.ready
@@ -287,9 +301,11 @@ Window {
                 // until all layers have been painted once (or 3 s, just in case); then start the intro
                 if (!win.warmT0) win.warmT0 = Date.now();
                 api.warm(true); C.__drawSectionsOnly(api); api.warm(false);
-                if ((win.staticLeft <= 0 && C.__secAllIdle() && Date.now() - win.warmT0 > 150) || Date.now() - win.warmT0 > 3000) {
+                var logos = C.__assetUrls().every(function (u) { return top.isImageLoaded(u); });
+                if ((win.staticLeft <= 0 && logos && C.__secAllIdle() && Date.now() - win.warmT0 > 150) || Date.now() - win.warmT0 > 3000) {
                     win.ready = true;
                     C.__drawSectionsOnly(api);         // back to the intro's start state (all hidden) before uncovering
+                    api.startChime();                  // power-on chime with the logo
                 }
                 return;
             }
