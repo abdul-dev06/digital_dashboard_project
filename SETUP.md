@@ -145,7 +145,7 @@ sh ~/dashboard/qt/run.sh
 Every time after:
 - `sh ~/dashboard/qt/run.sh` pulls the latest version from GitHub (15 s limit, skipped when offline), then starts the app.
 - `--no-update` skips the check.
-- The cluster is drawn at **1920x720** (a 12.3" automotive cluster panel's resolution) and the HDMI output is set to 1920x1080, so every test screen shows the same thing (a 4K TV at full resolution made the GPU the bottleneck). `CLUSTER_MODE=preferred` uses the screen's own mode; `CLUSTER_SCALE=1` draws at 1280x480 instead (faster).
+- The HDMI output is forced to 1280x720 and the cluster is drawn at **960x360** (0.75x), so every test screen gets the same picture and the GPU paints few pixels. Tested on the 4K TV: 4K output was GPU-bound, 1920x720 too heavy, 1280x480 good. `CLUSTER_SCALE=1` (1280x480) or `1.5` (1920x720) draws sharper; `CLUSTER_MODE=preferred` uses the screen's own mode.
 
 Using it:
 - Keys are typed on the **Rock64's keyboard**:
