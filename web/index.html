@@ -2324,9 +2324,16 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     }
   });
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
+  const WARM = { saved: null };
   if (typeof __exportCluster === "function") __exportCluster({
     step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
-    setSectionHook: f => { sectionHook = f; }, liveSig, setMode, mode: () => MODE.to, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    setSectionHook: f => { sectionHook = f; }, liveSig, setMode, mode: () => MODE.to,
+    // Qt start-up: draw() with the intro state at its end (everything shown, in place), so every
+    // layer can be drawn once behind a black screen before the logo starts. warm(false) restores it.
+    warm: on => {
+      if (on) { WARM.saved = Object.assign({}, A); Object.assign(A, { logo: 0, logoScale: 1, gauges: 1, dash: 1, move: 1, lamps: false, miniUp: 1, miniDown: 1 }); }
+      else if (WARM.saved) { Object.assign(A, WARM.saved); WARM.saved = null; }
+    }, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));

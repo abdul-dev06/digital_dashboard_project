@@ -37,6 +37,10 @@ Window {
     property bool showFps: false
     property bool topWas: false
     property string pendingMode: ""   // mode to switch to at the dark point of the fade
+    // start-up: every layer is drawn once behind a black cover before the intro (logo) starts
+    property bool ready: false
+    property int staticLeft: 1 + api.chromePieces().length   // background + chrome pieces still to be painted
+    property real warmT0: 0
 
     FontLoader { source: "fonts/DejaVuSans.ttf" }
     FontLoader { source: "fonts/DejaVuSans-Bold.ttf" }
@@ -51,7 +55,7 @@ Window {
         for (var si = 0; si < sections.count; si++) {
             var sec = sections.itemAt(si), items = [];
             for (var ti = 0; ti < sec.texts.count; ti++) items.push(sec.texts.itemAt(ti));
-            C.__secRegister(sec.name, sec.canvas); C.__setPool(sec.name, items);
+            C.__secRegister(sec.name, sec.canvas, sec); C.__setPool(sec.name, items);
         }
         var a = [], b = [];
         for (var i = 0; i < textsA.count; i++) a.push(textsA.itemAt(i));
@@ -76,8 +80,10 @@ Window {
                 id: bg
                 anchors.fill: parent
                 opacity: { win.frameNo; return api.dash(); }
+                property bool done: false
                 Component.onCompleted: requestPaint()
                 onPaint: { var c = getContext("2d"); C.__setMeasureCtx(c); api.paintBackgroundTo(c); }
+                onPainted: if (!done) { done = true; win.staticLeft--; }
             }
 
             // ---- Sport redline wash: top half pulses red behind the UI ----
@@ -101,9 +107,10 @@ Window {
                     x: modelData.x; y: modelData.y; width: modelData.w; height: modelData.h
                     clip: true
                     z: st.z
-                    opacity: st.opacity
-                    visible: opacity > 0.002
+                    opacity: st.opacity               // (kept visible at 0 so it's painted at start-up; the GPU skips it)
                     Canvas {
+                        property bool done: false
+                        onPainted: if (!done) { done = true; win.staticLeft--; }
                         x: -piece.modelData.x; y: -piece.modelData.y
                         width: 1280; height: 480
                         transform: [
@@ -138,6 +145,9 @@ Window {
                     property alias canvas: cv
                     property alias texts: tx
                     property bool on: false            // set after each paint: false = nothing drawn, so hide it
+                    property alias xf: dxf.matrix       // GPU move while the section's position animates
+                    transform: Matrix4x4 { id: dxf }
+                    opacity: 0                          // the section's fade, set from cluster.js
                     anchors.fill: parent
                     // the speedometer goes on top of the tach once Eco is past halfway
                     z: (name === "speed" || name === "speedFace") ? (win.frameNo, modelData.z + (api.speedOnTop() ? 4 : 0)) : modelData.z
@@ -254,6 +264,10 @@ Window {
             }
         }
     }
+    Rectangle {                                    // start-up cover (see win.ready)
+        anchors.fill: parent; color: "black"; z: 100
+        visible: !win.ready
+    }
     SequentialAnimation {
         id: modeFade
         NumberAnimation { target: view; property: "opacity"; to: 0; duration: 160; easing.type: Easing.InQuad }
@@ -268,6 +282,17 @@ Window {
     FrameAnimation {
         running: true
         onTriggered: {
+            if (!win.ready) {
+                // draw every section as it looks at the end of the intro, under the black cover,
+                // until all layers have been painted once (or 3 s, just in case); then start the intro
+                if (!win.warmT0) win.warmT0 = Date.now();
+                api.warm(true); C.__drawSectionsOnly(api); api.warm(false);
+                if ((win.staticLeft <= 0 && C.__secAllIdle() && Date.now() - win.warmT0 > 150) || Date.now() - win.warmT0 > 3000) {
+                    win.ready = true;
+                    C.__drawSectionsOnly(api);         // back to the intro's start state (all hidden) before uncovering
+                }
+                return;
+            }
             api.step(C.performance.now());
             win.frameNo++;
             // Repaint the live layer only when what it shows changed, and never queue a paint

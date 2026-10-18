@@ -196,48 +196,84 @@ function __applyTexts(id, list) {
 // change does it keep the drawing function and ask that section's canvas to repaint
 // (main.qml then calls __secPaint, in the same frame).
 var __secs = {}, __secFrame = 0;
-function __secRegister(name, canvas) { __secs[name] = { canvas: canvas, deps: null, fn: null, m: null, a: 1, seen: -1, shown: false, busy: 0 }; }
+// item: the section's Item (holds its canvas and text); its opacity and transform are set from here
+function __secRegister(name, canvas, item) {
+  __secs[name] = { canvas: canvas, item: item, deps: null, fn: null, pm: null, m: null, lastM: null, xf: null,
+                   seen: -1, shown: false, busy: 0, painted: false };
+}
 // A canvas is "busy" from requestPaint until Qt has rendered it (its painted signal -> __secDone).
 // While busy, changes wait for the next frame instead of queueing up: queued paints made the
 // picture lag behind the keys. (Safety: a paint that never reports back frees it after 300 ms.)
 function __busy(s) { return s.busy && Date.now() - s.busy < 300; }
-function __secDone(name) { var s = __secs[name]; if (s) s.busy = 0; }
+function __secDone(name) {
+  var s = __secs[name]; if (!s) return;
+  s.busy = 0; s.painted = true; s.m = s.pm;            // the picture on screen now has this matrix
+  if (s.lastM) __secXf(s, s.lastM);
+}
 function __secRequest(s) { s.busy = Date.now(); s.canvas.requestPaint(); }
+function __secAllIdle() { for (var k in __secs) if (__secs[k].shown && (__busy(__secs[k]) || !__secs[k].painted)) return false; return true; }
 function __same(a, b) {
   if (!b || a.length !== b.length) return false;
   for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
 }
+// 2D affine helpers ([a, b, c, d, e, f] like the canvas: x' = a x + c y + e, y' = b x + d y + f)
+function __mul(M, N) {
+  return [M[0] * N[0] + M[2] * N[1], M[1] * N[0] + M[3] * N[1], M[0] * N[2] + M[2] * N[3], M[1] * N[2] + M[3] * N[3],
+          M[0] * N[4] + M[2] * N[5] + M[4], M[1] * N[4] + M[3] * N[5] + M[5]];
+}
+function __inv(m) {
+  var det = m[0] * m[3] - m[1] * m[2]; if (Math.abs(det) < 1e-9) return [1, 0, 0, 1, 0, 0];
+  return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det];
+}
+// GPU move: show the picture (painted with matrix s.m) where matrix M would put it
+function __secXf(s, M) {
+  var T = s.m ? __mul(M, __inv(s.m)) : [1, 0, 0, 1, 0, 0];
+  for (var i = 0; i < 6; i++) T[i] = Math.round(T[i] * 1e4) / 1e4;
+  if (s.xf && __same(T, s.xf)) return;
+  s.xf = T;
+  s.item.xf = Qt.matrix4x4(T[0], T[2], 0, T[4], T[1], T[3], 0, T[5], 0, 0, 1, 0, 0, 0, 0, 1);
+}
+// draw() calls this instead of drawing a section.
+//  - opacity (fades) is applied by the GPU to the section's item: never a repaint;
+//  - a change of position/size (matrix) is first shown as a GPU transform of the existing
+//    picture, and repainted sharp once it stops moving;
+//  - a change of content (deps or theme) repaints it.
 function __secHook(name, deps, fn, c, frameSig, bounds) {
   var s = __secs[name];
   if (!s || c !== __L) { fn(); return; }           // no canvas for it, or not on the live layer: draw in place
-  var a = c.globalAlpha, full = deps.concat(frameSig || [], __m, [a]);
+  var a = c.globalAlpha, M = __m.slice(), content = deps.concat(frameSig || []);
   s.seen = __secFrame;
-  if (s.shown && __same(full, s.deps)) return;
-  if (__busy(s)) return;                            // still drawing the last change: try again next frame
-  s.deps = full; s.fn = fn; s.m = __m.slice(); s.a = a; s.shown = true;
-  if (bounds) __secFit(s.canvas, bounds);
-  __secRequest(s);
+  if (s.item.opacity !== a) s.item.opacity = a;
+  var changed = !s.shown || !__same(content, s.deps);
+  var settled = !changed && !__same(M, s.pm) && __same(M, s.lastM);
+  s.lastM = M;
+  if ((changed || settled) && !__busy(s)) {
+    s.deps = content; s.fn = fn; s.pm = M; s.shown = true;
+    if (bounds) __secFit(s.canvas, bounds, M);
+    __secRequest(s);
+  }
+  __secXf(s, M);
 }
-// move/resize a section's canvas to the on-screen box around its local bounds (whole pixels, on the stage)
-function __secFit(cv, b) {
-  var xs = [b[0], b[0] + b[2]], ys = [b[1], b[1] + b[3]], x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, m = __m;
+// size a section's canvas to the on-screen box around its local bounds (whole pixels, on the
+// stage); it only moves/grows when the box no longer fits, so most repaints keep the same canvas
+function __secFit(cv, b, m) {
+  var xs = [b[0], b[0] + b[2]], ys = [b[1], b[1] + b[3]], x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++) {
     var X = m[0] * xs[i] + m[2] * ys[j] + m[4], Y = m[1] * xs[i] + m[3] * ys[j] + m[5];
     x0 = Math.min(x0, X); x1 = Math.max(x1, X); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y);
   }
   x0 = Math.max(0, Math.floor(x0) - 1); y0 = Math.max(0, Math.floor(y0) - 1);
   x1 = Math.min(1280, Math.ceil(x1) + 1); y1 = Math.min(480, Math.ceil(y1) + 1);
-  var w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
-  if (cv.x !== x0) cv.x = x0;
-  if (cv.y !== y0) cv.y = y0;
-  if (cv.width !== w) cv.width = w;
-  if (cv.height !== h) cv.height = h;
+  var fits = cv.x <= x0 && cv.y <= y0 && cv.x + cv.width >= x1 && cv.y + cv.height >= y1;
+  var wasted = cv.width * cv.height > 2 * (x1 - x0) * (y1 - y0);      // much too big: shrink it
+  if (fits && !wasted) return;
+  cv.x = x0; cv.y = y0; cv.width = Math.max(1, x1 - x0); cv.height = Math.max(1, y1 - y0);
 }
-function __secEndFrame() {          // sections not drawn this frame (faded out, other mode) get cleared once
+function __secEndFrame() {          // sections not drawn this frame (faded out, other mode) are just hidden
   for (var k in __secs) {
     var s = __secs[k];
-    if (s.seen !== __secFrame && s.shown && !__busy(s)) { s.shown = false; s.fn = null; s.deps = null; __secRequest(s); }
+    if (s.seen !== __secFrame && s.item.opacity !== 0) s.item.opacity = 0;
   }
   __secFrame++;
 }
@@ -247,11 +283,11 @@ function __secPaint(name, c, api, ox, oy, w, h) {   // the canvas covers (ox, oy
   __beginLive(c);
   if (s && s.fn) {
     api.setCtx(c);
-    var m = s.m;
+    var m = s.pm;
     __M_save(c);
     c.setTransform(m[0], m[1], m[2], m[3], m[4] - ox, m[5] - oy);   // canvas is offset; the text positions are not
     __m = m.slice();
-    c.globalAlpha = s.a;
+    c.globalAlpha = 1;                                               // the section's fade is the item's opacity
     s.fn();
     __M_restore(c);
     drew = true;
@@ -2479,9 +2515,16 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     }
   });
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
+  const WARM = { saved: null };
   if (typeof __exportCluster === "function") __exportCluster({
     step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
-    setSectionHook: f => { sectionHook = f; }, liveSig, setMode, mode: () => MODE.to, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    setSectionHook: f => { sectionHook = f; }, liveSig, setMode, mode: () => MODE.to,
+    // Qt start-up: draw() with the intro state at its end (everything shown, in place), so every
+    // layer can be drawn once behind a black screen before the logo starts. warm(false) restores it.
+    warm: on => {
+      if (on) { WARM.saved = Object.assign({}, A); Object.assign(A, { logo: 0, logoScale: 1, gauges: 1, dash: 1, move: 1, lamps: false, miniUp: 1, miniDown: 1 }); }
+      else if (WARM.saved) { Object.assign(A, WARM.saved); WARM.saved = null; }
+    }, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));
