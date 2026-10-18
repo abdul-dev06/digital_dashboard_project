@@ -1070,7 +1070,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     if (alpha <= 0.001) return;
     ctx.save(); ctx.globalAlpha = alpha;
     ctx.translate(W / 2, H / 2); ctx.scale(scale * 1.5, scale * 1.5);
-    emblem(null);
+    section("logo", [], () => emblem(null), [-160, -160, 320, 320]);
     ctx.restore();
   }
 
@@ -1275,21 +1275,23 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const cw = 540, ch = 92 + body.length * 22;
     ctx.save();
     ctx.globalAlpha = vis;
-    ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, H);
+    section("alertDim", [], () => { ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, H); });
     ctx.translate(W / 2 - cw / 2, H / 2 - ch / 2 + 8 * (1 - Math.min(1, age / 0.3)));   // eases up into place
-    rrect(0, 0, cw, ch, 22); ctx.fillStyle = "#0e1217"; ctx.fill();
-    rrect(0, 0, cw, ch, 22); ctx.lineWidth = 1; ctx.strokeStyle = "#262e38"; ctx.stroke();
+    section("alert", [a.text, a.sub, a.color], () => {
+      rrect(0, 0, cw, ch, 22); ctx.fillStyle = "#0e1217"; ctx.fill();
+      rrect(0, 0, cw, ch, 22); ctx.lineWidth = 1; ctx.strokeStyle = "#262e38"; ctx.stroke();
 
-    // icon
-    const tx = 64, ty = 58;
-    ctx.beginPath(); ctx.moveTo(tx, ty - 26); ctx.lineTo(tx + 29, ty + 23); ctx.lineTo(tx - 29, ty + 23); ctx.closePath();
-    ctx.lineJoin = "round"; ctx.lineWidth = 4; ctx.strokeStyle = a.color; ctx.stroke();
-    ctx.fillStyle = a.color;
-    rrect(tx - 2.5, ty - 11, 5, 20, 2.5); ctx.fill();
-    ctx.beginPath(); ctx.arc(tx, ty + 15, 3, 0, Math.PI * 2); ctx.fill();
+      // icon
+      const tx = 64, ty = 58;
+      ctx.beginPath(); ctx.moveTo(tx, ty - 26); ctx.lineTo(tx + 29, ty + 23); ctx.lineTo(tx - 29, ty + 23); ctx.closePath();
+      ctx.lineJoin = "round"; ctx.lineWidth = 4; ctx.strokeStyle = a.color; ctx.stroke();
+      ctx.fillStyle = a.color;
+      rrect(tx - 2.5, ty - 11, 5, 20, 2.5); ctx.fill();
+      ctx.beginPath(); ctx.arc(tx, ty + 15, 3, 0, Math.PI * 2); ctx.fill();
 
-    text(a.text, 118, 52, 22, "#f2f4f7", { weight: 600, base: "alphabetic" });
-    body.forEach((l, i) => text(l, 118, 80 + i * 22, 15, "#9aa6b2", { base: "alphabetic" }));
+      text(a.text, 118, 52, 22, "#f2f4f7", { weight: 600, base: "alphabetic" });
+      body.forEach((l, i) => text(l, 118, 80 + i * 22, 15, "#9aa6b2", { base: "alphabetic" }));
+    }, [-4, -4, cw + 8, ch + 8]);
     ctx.restore();
   }
 
@@ -2034,10 +2036,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       text(Math.round(S.outsideTemp) + "°C", DCX + 52, BB - 9, 13, "#9aa6b2", { base: "alphabetic" });
     });
 
-    if (!LAYERED) drawTop();
+    drawTop();
   }
-  // Overlays above everything: the warning popup and the start-up logo.
-  // Qt draws these on their own layer, repainted only while one is showing.
+  // Overlays above everything: the warning popup and the start-up logo. They are sections, so in Qt
+  // each is drawn once and its fade / slide / zoom is done by the GPU.
   function drawTop() {
     drawAlertPopup();
     drawLogo(A.logo, A.logoScale);

@@ -45,7 +45,7 @@ sub(r"\bctx\.(translate|scale|rotate|save|restore|setTransform)\((\)?)",
 
 # logos and sounds: assets/logo.png (start-up + Sport), assets/logo-redline.png (Sport at redline),
 # assets/start.mp3 (power on), assets/alert.mp3 (warnings); any of them may be missing.
-# Logos are prepared like the web's prepareLogo(): 360 px on the long side, dark background keyed
+# Logos are prepared like the web's prepareLogo() (but 512 px on the long side), dark background keyed
 # out unless the file already has a transparent one, plus a red silhouette for the redline flash.
 ASSETS_IN = os.path.join(ROOT, "assets")
 ASSETS_OUT = os.path.join(OUT, "assets")
@@ -55,7 +55,7 @@ manifest = {"logos": {}, "sounds": {}}
 def prep_logo(src, name):
     from PIL import Image
     im = Image.open(src).convert("RGBA")
-    k = 360 / max(im.size)
+    k = min(1, 512 / max(im.size))          # 512 px: shown mipmapped, so it stays smooth at any size
     im = im.resize((round(im.width * k), round(im.height * k)), Image.LANCZOS)
     px = im.load()
     if not (px[0, 0][3] < 10 and px[im.width - 1, im.height - 1][3] < 10):

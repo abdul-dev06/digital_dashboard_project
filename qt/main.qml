@@ -5,7 +5,7 @@
 //
 // Layers, bottom to top (static ones are painted once, then only moved/faded by the GPU):
 //   background -> redline wash -> chrome pieces (per mode, clipped) -> sections -> live canvas -> its text
-//   -> overlay canvas (warning popup, start-up logo; only repainted while showing) -> its text
+//   -> overlay sections (warning popup, start-up logo), each with its own canvas, text and logo images
 // Text on the live layers is shown with native Text items (see __applyTexts in cluster.js):
 // Qt's canvas draws text slowly, and the strings rarely change between frames.
 // Sections (gauge faces, gauge needles, trips, rings, vehicle, lamps...) have their own canvas + text and are only
@@ -35,7 +35,6 @@ Window {
     property real jsMs: 0          // time spent in the live layer's drawing code (for the P readout)
     property real jsShown: 0
     property bool showFps: false
-    property bool topWas: false
     property string pendingMode: ""   // mode to switch to at the dark point of the fade
     // start-up: every layer is drawn once behind a black cover before the intro (logo) starts
     property bool ready: false
@@ -50,11 +49,9 @@ Window {
     FontLoader { source: "fonts/Michroma-Regular.ttf" }
 
     Component.onCompleted: {
-        // logos (qt/assets): every canvas that can draw one loads the images once
+        // logos (qt/assets) are shown with Image items; preload them all (see logoCache)
         C.__setAssetBase(Qt.resolvedUrl("assets/").toString());
-        var urls = C.__assetUrls(), cvs = [top, live];
-        for (var ci = 0; ci < sections.count; ci++) cvs.push(sections.itemAt(ci).canvas);
-        for (var k = 0; k < cvs.length; k++) for (var ui = 0; ui < urls.length; ui++) cvs[k].loadImage(urls[ui]);
+        logoCache.model = C.__assetUrls();
         C.__setSoundHook(function (name) { if (sounds.item) sounds.item.play(name); });
         api.setLayered(true);
         api.setSectionHook(C.__secHook);
@@ -62,11 +59,13 @@ Window {
             var sec = sections.itemAt(si), items = [];
             for (var ti = 0; ti < sec.texts.count; ti++) items.push(sec.texts.itemAt(ti));
             C.__secRegister(sec.name, sec.canvas, sec); C.__setPool(sec.name, items);
+            var ims = [];
+            for (var ii = 0; ii < sec.images.count; ii++) ims.push(sec.images.itemAt(ii));
+            C.__setImgPool(sec.name, ims);
         }
-        var a = [], b = [];
+        var a = [];
         for (var i = 0; i < textsA.count; i++) a.push(textsA.itemAt(i));
-        for (var j = 0; j < textsB.count; j++) b.push(textsB.itemAt(j));
-        C.__setPool("A", a); C.__setPool("B", b);
+        C.__setPool("A", a);
     }
 
     // The design is 1280x480; scale it to fit whatever screen is attached.
@@ -144,12 +143,16 @@ Window {
                          { name: "rings",     z: 4,   r: [880, 0, 400, 445] },  { name: "tachFace", z: 4.5, r: [180, 0, 920, 480] },
                          { name: "tach",      z: 5,   r: [180, 0, 920, 480] },  { name: "lamps", z: 6, r: [0, 420, 1280, 60] },
                          { name: "sportL",    z: 5.5, r: [0, 0, 560, 445] },    { name: "sportR", z: 5.5, r: [720, 0, 560, 445] },
-                         { name: "sportM",    z: 5.6, r: [400, 0, 480, 445] } ]
+                         { name: "sportM",    z: 5.6, r: [400, 0, 480, 445] },
+                     // overlays above the live layer: warning popup (dim + card) and the start-up logo
+                     { name: "alertDim",  z: 20,  r: [0, 0, 1280, 480] },   { name: "alert", z: 21, r: [360, 120, 560, 240] },
+                     { name: "logo",      z: 22,  r: [400, 0, 480, 480] } ]
                 delegate: Item {
                     required property var modelData
                     readonly property string name: modelData.name
                     property alias canvas: cv
                     property alias texts: tx
+                    property alias images: im
                     property bool on: false            // set after each paint: false = nothing drawn, so hide it
                     property alias xf: dxf.matrix       // GPU move while the section's position animates
                     transform: Matrix4x4 { id: dxf }
@@ -172,6 +175,7 @@ Window {
                     onImageLoaded: if (parent.on) requestPaint()
                     }
                     Repeater { id: tx; model: 40; delegate: liveText }
+                    Repeater { id: im; model: 3; delegate: liveImage }
                 }
             }
 
@@ -201,26 +205,15 @@ Window {
                 Repeater { id: textsA; model: 160; delegate: liveText }
             }
 
-            // ---- overlays: warning popup and start-up logo ----
-            Canvas {
-                id: top
-                anchors.fill: parent
-                z: 12
-                opacity: win.topWas ? 1 : 0          // hidden (not painted by the GPU) while there's no popup/logo
-                renderStrategy: Canvas.Threaded
-                onPaint: {
-                    var c = getContext("2d");
-                    c.clearRect(0, 0, 1280, 480);
-                    C.__setMeasureCtx(c);
-                    api.setCtx(c);
-                    C.__beginLive(c);
-                    api.drawTop();
-                    C.__applyTexts("B", C.__endLive());
+            Component {
+                id: liveImage
+                Image {
+                    property alias mx: m.matrix
+                    visible: false
+                    smooth: true; mipmap: true     // GPU scaling with mipmaps: clean at any size
+                    fillMode: Image.Stretch
+                    transform: Matrix4x4 { id: m }
                 }
-            }
-            Item {
-                z: 13; anchors.fill: parent
-                Repeater { id: textsB; model: 24; delegate: liveText }
             }
             Component {
                 id: liveText
@@ -234,7 +227,7 @@ Window {
             }
 
             Text {
-                z: 20; visible: win.showFps
+                z: 40; visible: win.showFps
                 x: 8; y: 4; color: "#7d8996"; font.pixelSize: 12
                 text: win.fps.toFixed(0) + " fps  ·  " + win.jsShown.toFixed(1) + " ms code"
             }
@@ -271,6 +264,12 @@ Window {
             }
         }
     }
+    // logos: loaded once at start-up and kept in Qt's image cache for the Image items above
+    Repeater {
+        id: logoCache
+        model: []
+        delegate: Image { required property var modelData; source: modelData; visible: false; mipmap: true }
+    }
     // chimes: optional (needs Qt's sound module); without it the cluster just runs silent
     Loader {
         id: sounds
@@ -301,7 +300,8 @@ Window {
                 // until all layers have been painted once (or 3 s, just in case); then start the intro
                 if (!win.warmT0) win.warmT0 = Date.now();
                 api.warm(true); C.__drawSectionsOnly(api); api.warm(false);
-                var logos = C.__assetUrls().every(function (u) { return top.isImageLoaded(u); });
+                var logos = true;
+                for (var li = 0; li < logoCache.count; li++) if (logoCache.itemAt(li).status !== Image.Ready) logos = false;
                 if ((win.staticLeft <= 0 && logos && C.__secAllIdle() && Date.now() - win.warmT0 > 150) || Date.now() - win.warmT0 > 3000) {
                     win.ready = true;
                     C.__drawSectionsOnly(api);         // back to the intro's start state (all hidden) before uncovering
@@ -320,9 +320,6 @@ Window {
             } else {
                 var t0 = Date.now(); C.__drawSectionsOnly(api); win.jsMs += Date.now() - t0;
             }
-            var t = api.topActive();
-            if (t || win.topWas) top.requestPaint();     // one last paint clears it
-            win.topWas = t;
             win.fpsN++;
             var now = Date.now();
             if (now - win.fpsT >= 1000) {

@@ -117,7 +117,12 @@ function __replay(c, rec) {
 }
 // drawImage that also accepts recorded canvases (replayed, scaled into the target box)
 function __drawImage(c, img, x, y, w, h) {
-  if (img && img.__file) { c.drawImage(__assetBase + img.__file, x, y, w, h); return; }   // a logo from qt/assets
+  if (img && img.__file) {                          // a logo from qt/assets
+    if (w === undefined) { w = img.width; h = img.height; }
+    // on a live layer: listed for a native Image item (smooth, mipmapped scaling on the GPU)
+    if (c === __L) { if (c.globalAlpha > 0.003) __I.push([img.__file, x, y, w, h, c.globalAlpha, __m[0], __m[1], __m[2], __m[3], __m[4], __m[5]]); return; }
+    c.drawImage(__assetBase + img.__file, x, y, w, h); return;
+  }
   if (img && img._ops) {
     var sw = img.width || 1, sh = img.height || 1;
     if (w === undefined) { w = sw; h = sh; }
@@ -136,8 +141,8 @@ function __ellipse(c, x, y, rx, ry) {
 // changes between frames, so on the live layers text() only records each string with the
 // transform and opacity it would have been drawn with. main.qml shows them with Text items,
 // which the GPU draws from a glyph cache and which are only touched when a string changes.
-var __L = null, __m = [1, 0, 0, 1, 0, 0], __ms = [], __T = [];
-function __beginLive(c) { __L = c; __m = [1, 0, 0, 1, 0, 0]; __ms = []; __T = []; }
+var __L = null, __m = [1, 0, 0, 1, 0, 0], __ms = [], __T = [], __I = [];
+function __beginLive(c) { __L = c; __m = [1, 0, 0, 1, 0, 0]; __ms = []; __T = []; __I = []; }
 function __endLive() { __L = null; return __T; }
 function __M_save(c) { if (c === __L) __ms.push(__m.slice()); c.save(); }
 function __M_restore(c) { if (c === __L && __ms.length) __m = __ms.pop(); c.restore(); }
@@ -183,6 +188,23 @@ function __qcolor(v) {
 }
 // Show a frame's strings on a pool of Text items (each item only changes when its string does).
 // Text items have width 0, so left/centre/right alignment happens around the anchor point.
+// logos on live layers: a small pool of Image items per layer, like the text pools
+var __imgPools = {};
+function __setImgPool(id, items) { var k = []; for (var i = 0; i < items.length; i++) k.push(""); __imgPools[id] = { items: items, keys: k }; }
+function __applyImages(id, list) {
+  var P = __imgPools[id]; if (!P) return;
+  var n = Math.min(list.length, P.items.length);
+  for (var i = 0; i < n; i++) {
+    var r = list[i], it = P.items[i], key = r.join("|");
+    if (P.keys[i] === key) continue;
+    P.keys[i] = key;
+    it.source = __assetBase + r[0]; it.width = r[3]; it.height = r[4]; it.opacity = r[5];
+    var x = r[1], y = r[2];
+    it.mx = Qt.matrix4x4(r[6], r[8], 0, r[6] * x + r[8] * y + r[10], r[7], r[9], 0, r[7] * x + r[9] * y + r[11], 0, 0, 1, 0, 0, 0, 0, 1);
+    it.visible = true;
+  }
+  for (var j = n; j < P.items.length; j++) if (P.keys[j] !== "") { P.keys[j] = ""; P.items[j].visible = false; }
+}
 var __pools = {};
 function __setPool(id, items) { var k = []; for (var i = 0; i < items.length; i++) k.push(""); __pools[id] = { items: items, keys: k }; }
 function __applyTexts(id, list) {
@@ -311,7 +333,9 @@ function __secPaint(name, c, api, ox, oy, w, h) {   // the canvas covers (ox, oy
     __M_restore(c);
     drew = true;
   }
+  var imgs = __I;
   __applyTexts(name, __endLive());
+  __applyImages(name, imgs);
   return drew;
 }
 
