@@ -129,7 +129,7 @@ Theme colours per mode in `THEMES`; numeral fonts per mode in `NUMFONTS`.
 
 **Sport (40/20/40):**
 - Left: bracket track (`SPT.verts`, rounded corners) fills orange → amber (last 10% before redline) → red past redline. Ticks every 500 rpm, numbers per 1000. Inside: coolant, fuel est, range, charging.
-- Middle: logo drawn big (`CFG.logoScale` 1.6) centred over the engine; hidden until `CFG.logoShowBelow` (1000) rpm below redline, eases to full at `logoFullAt` × redline, swaps to redline logo or flashes red at redline; a dark radial veil (alpha follows the logo) sits behind it so it reads boldly over the engine. Underneath, a **realistic engine, end view from the passenger side** (`ENG`), exterior only, same see-through wireframe look as the Eco car (outline in `THEMES.sport.car`, translucent tint). Front of car to the right. No exhaust or cats. Drawn around (cx, 230) and placed by `ENG.pose` (y 244, scale 1.15) to fill the column.
+- Middle: logo drawn big (`CFG.logoScale` 1.6) centred over the engine; hidden until `CFG.logoShowBelow` (1000) rpm below redline, eases up to `CFG.logoPreMax` (50 %) opacity at `logoFullAt` × redline, swaps to redline logo or flashes red at redline; a dark radial veil (alpha follows the logo) sits behind it so it reads boldly over the engine. Underneath, a **realistic engine, end view from the passenger side** (`ENG`), exterior only, same see-through wireframe look as the Eco car (outline in `THEMES.sport.car`, translucent tint). Front of car to the right. No exhaust or cats. Drawn around (cx, 230) and placed by `ENG.pose` (y 244, scale 1.15) to fill the column.
   - Static (cached in Sport chrome, `drawBayStatic`): oil pan with drain plug, block with ribs, head + gasket line, valve cover with oil cap and coil pack, thermostat housing + upper hose, engine mount on the timing end, timing-belt cover with two cam-sprocket bulges ("DOHC 16V"), intake plenum + runner + throttle body on the back, accessory bodies (alternator with vents, P/S pump + line, A/C compressor), tensioner arm, serpentine belt (`BELT`: outer tangents + wraps around alt → tensioner → A/C → crank → P/S).
   - Live (`drawBayLive`): head, block and timing cover heat toward red as rpm nears redline (`engHeat`, eased ~1.5 s in `bayUpdate`) with an outline glow; all pulleys spin at crank speed × diameter ratio (crank has a balancer ring, alternator goes green while charging). No cylinder firing (engine-agnostic).
   - Readouts: left IAT; right LOAD, ADV; shift flash below them. Cost: 5 pulleys + a few fills per frame; no extra OBD polling. Cat temps and λ are no longer shown in Sport (still polled for fuel calc: λ).
@@ -154,6 +154,7 @@ Theme colours per mode in `THEMES`; numeral fonts per mode in `NUMFONTS`.
 | ecoHeavy | 0.60 | Eco bar red above this fraction |
 | logoFullAt | 0.96 | Sport logo fully visible at this fraction of redline |
 | logoShowBelow | 1000 | Sport logo hidden until this many rpm below redline |
+| logoPreMax | 0.5 | Sport logo's opacity before redline tops out here; full at redline |
 | logoScale | 1.6 | Sport logo size over the engine |
 | limiterOver | 200 | toy rev limiter above redline |
 | offRpm / runRpm | 50 / 400 | engine state thresholds: off / cranking / running |

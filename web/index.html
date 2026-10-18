@@ -133,7 +133,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     speedMax: 220,      // km/h at the end of the speedometer
     ecoBand: [0.185, 0.40],   // shift-early band, as fractions of redline
     ecoHeavy: 0.60,           // Eco economy bar: above this fraction of redline reads as heavy
-    logoFullAt: 0.96,         // Sport: logo fully visible at this fraction of redline
+    logoFullAt: 0.96,         // Sport: logo reaches logoPreMax at this fraction of redline
+    logoPreMax: 0.5,          // Sport: the logo's opacity before redline tops out here; at redline it goes full
     logoShowBelow: 1000,      // Sport: logo starts appearing this many rpm below redline (hidden below that)
     logoScale: 1.6,           // Sport: logo size over the engine
     limiterOver: 200,         // rev limiter sits this far above redline
@@ -952,10 +953,12 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   function drawRevLogo(x, y, scale, alpha) {
     const inSport = MODE.to === "sport";
 
-      // logo: hidden until logoShowBelow rpm under redline, fully visible just before redline, flashing red at redline
+      // logo: hidden until logoShowBelow rpm under redline, then fades up to logoPreMax just before redline,
+      // full (flashing red) at redline
       const logoIn = inSport ? smooth(Math.max(0, Math.min(1, (MT - 0.2) / 0.5))) : 1;
       const full = REDLINE * CFG.logoFullAt, from = REDLINE - CFG.logoShowBelow;
-      const k = smooth(Math.max(0, Math.min(1, (S.rpm - from) / Math.max(1, full - from))));
+      const kr = smooth(Math.max(0, Math.min(1, (S.rpm - from) / Math.max(1, full - from))));   // 0..1 approach
+      const k = CFG.logoPreMax * kr;                                                               // its opacity
       const atRedline = S.rpm >= REDLINE;
       const flashOn = Math.floor(performance.now() / 110) % 2 === 0;
       const flash = flashOn ? 1 : 0.25;
@@ -973,10 +976,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       logoMoving = redK > 0 && redK < 1;
       // at redline: swap to the redline logo if one is loaded, otherwise flash the main logo red
       if (!logoRedImg) {
-        drawEmblemAt(x, y, scale * (0.95 + 0.08 * k), alpha * logoIn * vis, atRedline ? "#ff2d3f" : null, null);
+        drawEmblemAt(x, y, scale * (0.95 + 0.08 * kr), alpha * logoIn * vis, atRedline ? "#ff2d3f" : null, null);
       } else {
         // crossfade: main logo shrinks and fades out, redline logo punches in and flashes red
-        const e = smooth(redK), base = scale * (0.95 + 0.08 * k);
+        const e = smooth(redK), base = scale * (0.95 + 0.08 * kr);
         const mainVis = k;
         drawEmblemAt(x, y, base * (1 - 0.18 * e), alpha * logoIn * mainVis * (1 - e), null, null);
         drawEmblemAt(x, y, base * (1.18 - 0.18 * e), alpha * logoIn * e * (atRedline ? flash : 1),
