@@ -530,24 +530,16 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       ctx.lineWidth = 10; ctx.strokeStyle = lit; ctx.globalAlpha *= 0.07; ctx.stroke();
       ctx.restore();
     }
-    const byCol = new Map();                              // one stroke per colour
+    // each segment is a short straight bar (at this size it looks the same as an arc, costs less,
+    // and Qt's canvas draws short wide arcs with spiky joins); one stroke per colour
+    const segs = [];
     for (let i = 0; i < N; i++) {
-      const a0 = A0 + i * (segSw + gap), mid = (i + 0.5) / N;
+      const a0 = (A0 + i * (segSw + gap)) * Math.PI / 180, a1 = a0 + segSw * Math.PI / 180, mid = (i + 0.5) / N;
       const zone = mid >= wStart && mid <= wEnd;
       const col = mid <= k ? (zone ? warnColor : lit) : (zone ? (warnColor === RED ? "#3a1016" : "#3a2a0c") : "#182028");
-      if (!byCol.has(col)) byCol.set(col, []);
-      byCol.get(col).push(a0);
+      segs.push([cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, 6, col]);
     }
-    ctx.lineWidth = 6;
-    for (const [col, starts] of byCol) {
-      ctx.beginPath();
-      for (const a0 of starts) {
-        const r0 = a0 * Math.PI / 180;
-        ctx.moveTo(cx + Math.cos(r0) * r, cy + Math.sin(r0) * r);
-        ctx.arc(cx, cy, r, r0, (a0 + segSw) * Math.PI / 180);
-      }
-      ctx.strokeStyle = col; ctx.stroke();
-    }
+    strokeBatch(segs);
     // tip
     const ta = (A0 + SW * k) * Math.PI / 180;
     const tx = cx + Math.cos(ta) * r, ty = cy + Math.sin(ta) * r;
