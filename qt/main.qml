@@ -4,7 +4,10 @@
 // loop and the keyboard.
 //
 // Layers, bottom to top (static ones are painted once, then only moved/faded by the GPU):
-//   background  -> redline wash -> chrome pieces (per mode, clipped) -> live canvas
+//   background -> redline wash -> chrome pieces (per mode, clipped) -> live canvas -> its text
+//   -> overlay canvas (warning popup, start-up logo; only repainted while showing) -> its text
+// Text on the live layers is shown with native Text items (see __applyTexts in cluster.js):
+// Qt's canvas draws text slowly, and the strings rarely change between frames.
 //
 // Keys: K key on, E start/stop engine, Space rev, arrows shift, 1/2/3 modes,
 //       C cold, H overheat, M check engine, F filled up, I icy, L OBD lost, Esc quit.
@@ -23,7 +26,10 @@ Window {
     readonly property var api: C.__API
     property int frameNo: 0
     property real fps: 0
+    property real jsMs: 0          // time spent in the live layer's drawing code (for the P readout)
+    property real jsShown: 0
     property bool showFps: false
+    property bool topWas: false
 
     FontLoader { source: "fonts/DejaVuSans.ttf" }
     FontLoader { source: "fonts/DejaVuSans-Bold.ttf" }
@@ -35,6 +41,10 @@ Window {
     Component.onCompleted: {
         C.__setTexUrl(Qt.resolvedUrl("texture.png").toString());
         api.setLayered(true);
+        var a = [], b = [];
+        for (var i = 0; i < textsA.count; i++) a.push(textsA.itemAt(i));
+        for (var j = 0; j < textsB.count; j++) b.push(textsB.itemAt(j));
+        C.__setPool("A", a); C.__setPool("B", b);
     }
 
     // The design is 1280x480; scale it to fit whatever screen is attached.
@@ -106,14 +116,53 @@ Window {
                 var c = getContext("2d");
                 C.__setMeasureCtx(c);
                 api.setCtx(c);
+                var t0 = Date.now();
+                C.__beginLive(c);
                 api.draw();
+                C.__applyTexts("A", C.__endLive());
+                win.jsMs += Date.now() - t0;
+            }
+        }
+        Item {
+            z: 11; anchors.fill: parent
+            Repeater { id: textsA; model: 160; delegate: liveText }
+        }
+
+        // ---- overlays: warning popup and start-up logo ----
+        Canvas {
+            id: top
+            anchors.fill: parent
+            z: 12
+            renderStrategy: Canvas.Threaded
+            onPaint: {
+                var c = getContext("2d");
+                c.clearRect(0, 0, 1280, 480);
+                C.__setMeasureCtx(c);
+                api.setCtx(c);
+                C.__beginLive(c);
+                api.drawTop();
+                C.__applyTexts("B", C.__endLive());
+            }
+        }
+        Item {
+            z: 13; anchors.fill: parent
+            Repeater { id: textsB; model: 24; delegate: liveText }
+        }
+        Component {
+            id: liveText
+            Text {
+                property alias mx: m.matrix
+                visible: false
+                width: 0
+                textFormat: Text.PlainText
+                transform: Matrix4x4 { id: m }
             }
         }
 
         Text {
             z: 20; visible: win.showFps
             x: 8; y: 4; color: "#7d8996"; font.pixelSize: 12
-            text: win.fps.toFixed(0) + " fps"
+            text: win.fps.toFixed(0) + " fps  ·  " + win.jsShown.toFixed(1) + " ms code"
         }
 
         // ---- keyboard: same key codes as the browser version ----
@@ -149,9 +198,16 @@ Window {
             api.step(C.performance.now());
             win.frameNo++;
             live.requestPaint();
+            var t = api.topActive();
+            if (t || win.topWas) top.requestPaint();     // one last paint clears it
+            win.topWas = t;
             win.fpsN++;
             var now = Date.now();
-            if (now - win.fpsT >= 1000) { win.fps = win.fpsN * 1000 / (now - win.fpsT); win.fpsN = 0; win.fpsT = now; }
+            if (now - win.fpsT >= 1000) {
+                win.fps = win.fpsN * 1000 / (now - win.fpsT); win.jsShown = win.jsMs / Math.max(1, win.fpsN);
+                if (win.showFps) console.log(win.fps.toFixed(1) + " fps, " + win.jsShown.toFixed(1) + " ms code per frame");
+                win.fpsN = 0; win.jsMs = 0; win.fpsT = now;
+            }
         }
     }
 }

@@ -119,6 +119,84 @@ function __pattern(c) {
   try { return c.createPattern(__texUrl, "repeat"); } catch (e) { return null; }
 }
 
+// ---- live layers: transforms are tracked and text is handed to native Qt Text items ----
+// Qt's canvas turns every fillText into a path (slow on the Rock64), and the text barely
+// changes between frames, so on the live layers text() only records each string with the
+// transform and opacity it would have been drawn with. main.qml shows them with Text items,
+// which the GPU draws from a glyph cache and which are only touched when a string changes.
+var __L = null, __m = [1, 0, 0, 1, 0, 0], __ms = [], __T = [];
+function __beginLive(c) { __L = c; __m = [1, 0, 0, 1, 0, 0]; __ms = []; __T = []; }
+function __endLive() { __L = null; return __T; }
+function __M_save(c) { if (c === __L) __ms.push(__m.slice()); c.save(); }
+function __M_restore(c) { if (c === __L && __ms.length) __m = __ms.pop(); c.restore(); }
+function __M_translate(c, x, y) {
+  if (c === __L) { __m[4] += __m[0] * x + __m[2] * y; __m[5] += __m[1] * x + __m[3] * y; }
+  c.translate(x, y);
+}
+function __M_scale(c, sx, sy) {
+  if (c === __L) { __m[0] *= sx; __m[1] *= sx; __m[2] *= sy; __m[3] *= sy; }
+  c.scale(sx, sy);
+}
+function __M_rotate(c, a) {
+  if (c === __L) {
+    var cs = Math.cos(a), sn = Math.sin(a), m = __m;
+    __m = [m[0] * cs + m[2] * sn, m[1] * cs + m[3] * sn, m[2] * cs - m[0] * sn, m[3] * cs - m[1] * sn, m[4], m[5]];
+  }
+  c.rotate(a);
+}
+function __M_setTransform(c, a, b, cc, d, e, f) { if (c === __L) __m = [a, b, cc, d, e, f]; c.setTransform(a, b, cc, d, e, f); }
+function __text(c, s, x, y, size, color, weight, family, align, base, ls) {
+  if (c !== __L) {      // static layers and recorded images: draw it on the canvas as usual
+    c.font = weight + " " + size + "px " + family; c.fillStyle = color;
+    c.textAlign = align; c.textBaseline = base; c.fillText(s, x, y);
+    return;
+  }
+  var a = c.globalAlpha;
+  if (a <= 0.003 || s === "") return;
+  __T.push([s, x, y, size, color, weight, family, align, base, ls, a, __m[0], __m[1], __m[2], __m[3], __m[4], __m[5]]);
+}
+function __measure(c, s, size, weight, ls, family) {
+  c.font = weight + " " + size + "px " + family;
+  return c.measureText(s).width + ls * s.length;     // letter spacing is drawn by the Text items
+}
+var __colors = {}, __fonts = {};
+function __qcolor(v) {
+  if (typeof v !== "string") return "#ffffff";
+  var c = __colors[v];
+  if (c !== undefined) return c;
+  var m = /^rgba?\(([^)]*)\)$/.exec(v.replace(/\s+/g, ""));
+  if (m) { var p = m[1].split(","); c = Qt.rgba(p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? +p[3] : 1); }
+  else c = v;
+  return (__colors[v] = c);
+}
+// Show a frame's strings on a pool of Text items (each item only changes when its string does).
+// Text items have width 0, so left/centre/right alignment happens around the anchor point.
+var __pools = {};
+function __setPool(id, items) { var k = []; for (var i = 0; i < items.length; i++) k.push(""); __pools[id] = { items: items, keys: k }; }
+function __applyTexts(id, list) {
+  if (!__pools[id]) return;
+  var pool = __pools[id].items, keys = __pools[id].keys;
+  var n = Math.min(list.length, pool.length);
+  for (var i = 0; i < n; i++) {
+    var r = list[i], it = pool[i], key = r.join("|");
+    if (keys[i] === key) continue;
+    keys[i] = key;
+    var size = r[3], px = Math.max(1, Math.round(size)), k = size / px;
+    var fam = r[6].replace(/['"]/g, ""), fk = fam + "|" + px + "|" + r[5] + "|" + r[9];
+    var f = __fonts[fk] || (__fonts[fk] = Qt.font({ family: fam, pixelSize: px, weight: r[5], letterSpacing: r[9] }));
+    it.font = f; it.text = r[0]; it.color = __qcolor(r[4]); it.opacity = r[10];
+    it.horizontalAlignment = r[7] === "center" ? 4 : (r[7] === "right" || r[7] === "end") ? 2 : 1;   // AlignHCenter / AlignRight / AlignLeft
+    var b = r[8], h = it.implicitHeight;
+    var dy = (b === "top" || b === "hanging") ? 0 : b === "alphabetic" ? -it.baselineOffset : b === "middle" ? -h / 2 : -h;
+    var x = r[1], y = r[2] + k * dy;
+    it.mx = Qt.matrix4x4(r[11] * k, r[13] * k, 0, r[11] * x + r[13] * y + r[15],
+                         r[12] * k, r[14] * k, 0, r[12] * x + r[14] * y + r[16],
+                         0, 0, 1, 0, 0, 0, 0, 1);
+    it.visible = true;
+  }
+  for (var j = n; j < pool.length; j++) if (keys[j] !== "") { keys[j] = ""; pool[j].visible = false; }
+}
+
 function __setTexUrl(u) { __texUrl = u; }
 function __setMeasureCtx(c) { __measureCtx = c; }
 var __API = null;
@@ -268,7 +346,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const k = smooth(modeK);
     if (k >= 1 || MODE.from === MODE.to) { fn(NUMFONTS[MODE.to]); return; }
     for (const [m, a] of [[MODE.from, 1 - k], [MODE.to, k]]) {
-      ctx.save(); ctx.globalAlpha *= a; fn(NUMFONTS[m]); ctx.restore();
+      __M_save(ctx); ctx.globalAlpha *= a; fn(NUMFONTS[m]); __M_restore(ctx);
     }
   }
   const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
@@ -315,7 +393,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const BT = 446, BB = 474;               // bottom strip top / bottom (screen coordinates): just fits the lamps
   // Everything above the strip is drawn 8% larger to fill the space the slim strip frees up.
   const GS = 1.08, G_TOP = 8, G_SRC_TOP = 14;
-  function enterGroup() { ctx.translate(W / 2, G_TOP); ctx.scale(GS, GS); ctx.translate(-W / 2, -G_SRC_TOP); }
+  function enterGroup() { __M_translate(ctx, W / 2, G_TOP); __M_scale(ctx, GS, GS); __M_translate(ctx, -W / 2, -G_SRC_TOP); }
   const ang = v => 180 + 250 * Math.max(0, Math.min(1, v / MAXRPM));
   const toRad = a => (a - 90) * Math.PI / 180;
   const wrapX = y => Math.sqrt(Math.max(0, WRAP * WRAP - (y - DCY) * (y - DCY)));   // half-width of the cut at y
@@ -326,7 +404,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const scale = (w / W) * dpr;
     cv.width = Math.round(W * scale);
     cv.height = Math.round(H * scale);
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    __M_setTransform(ctx, scale, 0, 0, scale, 0, 0);
     curScale = scale;
   }
 
@@ -341,21 +419,9 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     ctx.closePath();
   }
   function text(str, x, y, size, color, opts = {}) {
-    ctx.font = `${opts.weight || 400} ${size}px ${opts.family || FONT}`;
-    ctx.fillStyle = color;
-    ctx.textAlign = opts.align || "left";
-    ctx.textBaseline = opts.base || "top";
-    if ("letterSpacing" in ctx) ctx.letterSpacing = (opts.ls || 0) + "px";
-    ctx.fillText(String(str), x, y);
-    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    __text(ctx, String(str), x, y, size, color, opts.weight || 400, opts.family || FONT, opts.align || "left", opts.base || "top", opts.ls || 0);
   }
-  function measure(str, size, weight = 400, ls = 0, family = FONT) {
-    ctx.font = `${weight} ${size}px ${family}`;
-    if ("letterSpacing" in ctx) ctx.letterSpacing = ls + "px";
-    const w = ctx.measureText(String(str)).width;
-    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
-    return w;
-  }
+  function measure(str, size, weight = 400, ls = 0, family = FONT) { return __measure(ctx, String(str), size, weight, ls, family); }
   const fmtTime = s => { const m = Math.floor(s / 60), h = Math.floor(m / 60), mm = m % 60; return h + ":" + (mm < 10 ? "0" : "") + mm; };
 
   // ---- Shapes ----
@@ -402,10 +468,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   let texPattern = null;
   function texture(alpha) {
     texPattern = texPattern || __pattern(ctx); if (!texPattern) return;
-    ctx.save();
+    __M_save(ctx);
     ctx.globalAlpha *= alpha;
     ctx.fillStyle = texPattern; ctx.fill();
-    ctx.restore();
+    __M_restore(ctx);
   }
 
   function fillPanel(pathFn, top, bottom) {
@@ -418,13 +484,13 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // Rock64-friendly glow: two wide see-through strokes under the core line.
   // No blur filter, so it costs about the same as three plain lines.
   function glowStroke(color, width, blur) {
-    ctx.save();
+    __M_save(ctx);
     const a0 = ctx.globalAlpha;
     ctx.strokeStyle = color;
     ctx.globalAlpha = a0 * 0.10; ctx.lineWidth = width + blur * 1.3; ctx.stroke();
     ctx.globalAlpha = a0 * 0.22; ctx.lineWidth = width + blur * 0.55; ctx.stroke();
     ctx.globalAlpha = a0; ctx.lineWidth = width; ctx.stroke();
-    ctx.restore();
+    __M_restore(ctx);
   }
 
 
@@ -499,7 +565,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // ---- Pieces ----
   function telltale(x, y, w, label, color, on) {
     rrect(x, y, w, 18, 9);
-    if (on) { ctx.save(); ctx.globalAlpha *= 0.18; ctx.fillStyle = color; ctx.fill(); ctx.restore(); }
+    if (on) { __M_save(ctx); ctx.globalAlpha *= 0.18; ctx.fillStyle = color; ctx.fill(); __M_restore(ctx); }
     ctx.lineWidth = 1.2; ctx.strokeStyle = on ? color : "#1c232b"; ctx.stroke();
     text(label, x + w / 2, y + 9.5, 9, on ? color : "#2a333d", { weight: 700, align: "center", base: "middle", ls: 1 });
   }
@@ -513,7 +579,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // level fill as a soft band inside the pill
     const fw = Math.max(0, Math.min(1, ratio)) * (w - 8);
     if (fw > 2) {
-      ctx.save(); rrect(x, y, w, h, 21); ctx.clip();
+      __M_save(ctx); rrect(x, y, w, h, 21); ctx.clip();
       const g = ctx.createLinearGradient(x, 0, x + fw, 0);
       g.addColorStop(0, warn ? "rgba(255,45,63,0.05)" : "rgba(201,210,220,0.03)");
       g.addColorStop(1, warn ? "rgba(255,45,63,0.28)" : "rgba(201,210,220,0.09)");
@@ -521,7 +587,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       const bw = Math.max(0, Math.min(1, ratio)) * (w - 40);
       rrect(x + 20, y + h - 7, w - 40, 2, 1); ctx.fillStyle = "#1e262f"; ctx.fill();
       rrect(x + 20, y + h - 7, bw, 2, 1); ctx.fillStyle = warn ? RED : "#c9d2dc"; ctx.fill();
-      ctx.restore();
+      __M_restore(ctx);
     }
     text(label, x + 20, y + h / 2 - 2, 10, "#7d8996", { base: "middle", ls: 1.5 });
     const uw = measure(unit, 11);
@@ -544,10 +610,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
 
     // soft glow behind the lit part
     if (k > 0.01) {
-      ctx.save();
+      __M_save(ctx);
       ctx.beginPath(); ctx.arc(cx, cy, r, A0 * Math.PI / 180, (A0 + SW * k) * Math.PI / 180);
       ctx.lineWidth = 10; ctx.strokeStyle = lit; ctx.globalAlpha *= 0.07; ctx.stroke();
-      ctx.restore();
+      __M_restore(ctx);
     }
     for (let i = 0; i < N; i++) {
       const a0 = A0 + i * (segSw + gap), mid = (i + 0.5) / N;
@@ -578,7 +644,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const SCX = 322, SCY = 262, SR = 128, SMAX = CFG.speedMax;
   const sAng = v => 180 + 270 * Math.max(0, Math.min(1, v / SMAX));   // deg from 12 o'clock
   function drawSpeedGauge(lamp) {
-    ctx.save();
+    __M_save(ctx);
     const sh = ctx.createRadialGradient(SCX, SCY, SR, SCX, SCY, SR + 20);          // drop shade as a gradient, no blur
     sh.addColorStop(0, "rgba(0,0,0,0.55)"); sh.addColorStop(1, "rgba(0,0,0,0)");
     ctx.beginPath(); ctx.arc(SCX, SCY, SR + 20, 0, Math.PI * 2); ctx.fillStyle = sh; ctx.fill();
@@ -586,7 +652,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const fg = ctx.createRadialGradient(SCX, SCY - 30, 10, SCX, SCY, SR);
     fg.addColorStop(0, "#0d1116"); fg.addColorStop(1, "#050608");
     ctx.fillStyle = fg; ctx.fill();
-    ctx.restore();
+    __M_restore(ctx);
     ctx.beginPath(); ctx.arc(SCX, SCY, SR + 6, 0, Math.PI * 2);
     ctx.lineWidth = 2; ctx.strokeStyle = "#202830"; ctx.stroke();
 
@@ -631,7 +697,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function drawDial(lamp) {
     // soft halo so the dial reads as the top layer
-    ctx.save();
+    __M_save(ctx);
     const sh = ctx.createRadialGradient(DCX, DCY, DR, DCX, DCY, DR + 24);          // drop shade as a gradient, no blur
     sh.addColorStop(0, "rgba(0,0,0,0.6)"); sh.addColorStop(1, "rgba(0,0,0,0)");
     ctx.beginPath(); ctx.arc(DCX, DCY, DR + 24, 0, Math.PI * 2); ctx.fillStyle = sh; ctx.fill();
@@ -639,7 +705,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const fg = ctx.createRadialGradient(DCX, DCY - 40, 20, DCX, DCY, DR);
     fg.addColorStop(0, "#0d1116"); fg.addColorStop(1, "#050608");
     ctx.fillStyle = fg; ctx.fill();
-    ctx.restore();
+    __M_restore(ctx);
     ctx.beginPath(); ctx.arc(DCX, DCY, DR + 4, 0, Math.PI * 2);
     ctx.lineWidth = 2; ctx.strokeStyle = "#202830"; ctx.stroke();
     ctx.beginPath(); ctx.arc(DCX, DCY, DR * 0.57, 0, Math.PI * 2);
@@ -683,10 +749,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // ECO: shift-early band on the track
     if (ecoA > 0.01) {
       const [e0, e1] = CFG.ecoBand.map(f => f * REDLINE);
-      ctx.save(); ctx.globalAlpha *= ecoA;
+      __M_save(ctx); ctx.globalAlpha *= ecoA;
       ctx.beginPath(); ctx.arc(DCX, DCY, DR - 4, toRad(ang(e0)), toRad(ang(e0 + (e1 - e0) * into("eco", 0.8))));
       glowStroke(THEMES.eco.accent, 7, 10);
-      ctx.restore();
+      __M_restore(ctx);
     }
 
   }
@@ -834,7 +900,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       if (alpha <= 0.01) continue;
       const label = on ? "CHARGING" : "NOT CHARGING", col = on ? "#5ee08a" : "#5d6873";
       const lw = measure(label, 9, 400, 1.8), bx = cx - (28 + lw) / 2;
-      ctx.save(); ctx.globalAlpha *= alpha;
+      __M_save(ctx); ctx.globalAlpha *= alpha;
       rrect(bx, sy - 6, 18, 11, 2); ctx.lineWidth = 1.3; ctx.strokeStyle = col; ctx.stroke();
       ctx.fillStyle = col; ctx.fillRect(bx + 18, sy - 2.5, 2.5, 4);
       if (on) {
@@ -842,7 +908,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
         ctx.lineTo(bx + 8, sy + 4.5); ctx.lineTo(bx + 12.5, sy - 1.5); ctx.lineTo(bx + 9.5, sy - 1.5); ctx.closePath(); ctx.fill();
       } else ctx.fillRect(bx + 5, sy - 0.5, 8, 1.2);
       text(label, bx + 28, sy, 9, col, { base: "middle", ls: 1.8 });
-      ctx.restore();
+      __M_restore(ctx);
     }
   }
   // advance the road, brake-light and charging state once per frame (shared by all modes)
@@ -1058,18 +1124,18 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function drawEmblemAt(x, y, scale, alpha, tint, img) {
     if (alpha <= 0.001) return;
-    ctx.save();
+    __M_save(ctx);
     ctx.globalAlpha *= alpha;
-    ctx.translate(x, y); ctx.scale(scale, scale);
+    __M_translate(ctx, x, y); __M_scale(ctx, scale, scale);
     emblem(tint, img || logoImg);
-    ctx.restore();
+    __M_restore(ctx);
   }
   function drawLogo(alpha, scale) {
     if (alpha <= 0.001) return;
-    ctx.save(); ctx.globalAlpha = alpha;
-    ctx.translate(W / 2, H / 2); ctx.scale(scale * 1.5, scale * 1.5);
+    __M_save(ctx); ctx.globalAlpha = alpha;
+    __M_translate(ctx, W / 2, H / 2); __M_scale(ctx, scale * 1.5, scale * 1.5);
     emblem(null);
-    ctx.restore();
+    __M_restore(ctx);
   }
 
   function drawTrips() {
@@ -1193,7 +1259,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
 
     // eco: airflow lines sliding round the body
     if (ecoA > 0.01) {
-      ctx.save();
+      __M_save(ctx);
       ctx.globalAlpha *= ecoA;
       ctx.setLineDash([10, 16]); ctx.lineDashOffset = -flowOffset;
       ctx.lineWidth = 1.5; ctx.lineCap = "round";
@@ -1207,25 +1273,25 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
           ctx.stroke();
         }
       }
-      ctx.restore();
+      __M_restore(ctx);
     }
 
     // car image, cross-faded between modes; sport sits a little wider and lower
     const stX = 1 + 0.06 * sportA, stY = 1 - 0.02 * sportA;
-    ctx.save();
-    ctx.translate(cx, top + CAR_H / 2); ctx.scale(stX, stY); ctx.translate(-cx, -(top + CAR_H / 2));
+    __M_save(ctx);
+    __M_translate(ctx, cx, top + CAR_H / 2); __M_scale(ctx, stX, stY); __M_translate(ctx, -cx, -(top + CAR_H / 2));
     __drawImage(ctx, carFor("eco"), cx - CAR_W / 2, top, CAR_W, CAR_H);   // top-view car is Eco-only now
-    ctx.restore();
+    __M_restore(ctx);
 
     // sport: tail lights glow
     if (sportA > 0.01) {
-      ctx.save(); ctx.globalAlpha *= sportA;
+      __M_save(ctx); ctx.globalAlpha *= sportA;
       const ty = top + CAR_H * 0.965, hw = CAR_W * stX / 2;
       for (const side of [-1, 1]) {
         ctx.beginPath(); ctx.moveTo(cx + side * hw * 0.66, ty - 1); ctx.lineTo(cx + side * hw * 0.34, ty + 2);
         glowStroke("#ff2d3f", 3, 10);
       }
-      ctx.restore();
+      __M_restore(ctx);
     }
 
     // hood heat glow: blue when cold, red when hot, nothing in between
@@ -1237,9 +1303,9 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       const hy = top + CAR_H * 0.17;
       const g = ctx.createRadialGradient(cx, hy, 4, cx, hy, 46);
       g.addColorStop(0, rgba(col, 0.55 * amt)); g.addColorStop(1, rgba(col, 0));
-      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      __M_save(ctx); ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = g; ctx.beginPath(); __ellipse(ctx, cx, hy, 40, 34, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
+      __M_restore(ctx);
     };
     const pulse = hot > 0 ? 0.7 + 0.3 * Math.sin(now * 6) : 1;
     glow("#3d8bff", cold);
@@ -1271,10 +1337,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     if (vis <= 0) return;
     const body = wrapLines(a.sub, 15, 400);
     const cw = 540, ch = 92 + body.length * 22;
-    ctx.save();
+    __M_save(ctx);
     ctx.globalAlpha = vis;
     ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, H);
-    ctx.translate(W / 2 - cw / 2, H / 2 - ch / 2 + 8 * (1 - Math.min(1, age / 0.3)));   // eases up into place
+    __M_translate(ctx, W / 2 - cw / 2, H / 2 - ch / 2 + 8 * (1 - Math.min(1, age / 0.3)));   // eases up into place
     rrect(0, 0, cw, ch, 22); ctx.fillStyle = "#0e1217"; ctx.fill();
     rrect(0, 0, cw, ch, 22); ctx.lineWidth = 1; ctx.strokeStyle = "#262e38"; ctx.stroke();
 
@@ -1288,7 +1354,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
 
     text(a.text, 118, 52, 22, "#f2f4f7", { weight: 600, base: "alphabetic" });
     body.forEach((l, i) => text(l, 118, 80 + i * 22, 15, "#9aa6b2", { base: "alphabetic" }));
-    ctx.restore();
+    __M_restore(ctx);
   }
 
   // Eco: economy bar = live rpm as a share of redline. Lower is better.
@@ -1305,7 +1371,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // track + efficient zone
     rrect(bx, by0, bw, bh, bw / 2); ctx.fillStyle = "#10151b"; ctx.fill();
     ctx.lineWidth = 1; ctx.strokeStyle = "#232b35"; ctx.stroke();
-    ctx.save(); rrect(bx, by0, bw, bh, bw / 2); ctx.clip();
+    __M_save(ctx); rrect(bx, by0, bw, bh, bw / 2); ctx.clip();
     ctx.fillStyle = rgba(THEMES.eco.accent, 0.10); ctx.fillRect(bx, by1 - bh * good, bw, bh * good);
     // fill from the bottom
     const fh = bh * f;
@@ -1314,7 +1380,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       g.addColorStop(0, rgba(col, 0.55)); g.addColorStop(1, col);
       ctx.fillStyle = g; ctx.fillRect(bx, by1 - fh, bw, fh);
     }
-    ctx.restore();
+    __M_restore(ctx);
     // level marker
     const my = by1 - fh;
     ctx.beginPath(); ctx.moveTo(bx - 6, my); ctx.lineTo(bx + bw + 6, my); glowStroke("#ffffff", 2, 5);
@@ -1345,11 +1411,11 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   let leafK = 0;
   // simple leaf icon: two curved edges, a stem and a centre vein (no blur)
   function drawLeaf(x, y, s, col, a) {
-    ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.rotate(-0.6);
+    __M_save(ctx); ctx.globalAlpha *= a; __M_translate(ctx, x, y); __M_rotate(ctx, -0.6);
     ctx.beginPath(); ctx.moveTo(0, s); ctx.quadraticCurveTo(s * 0.95, s * 0.1, 0, -s); ctx.quadraticCurveTo(-s * 0.95, s * 0.1, 0, s); ctx.closePath();
     ctx.fillStyle = rgba(col, 0.35); ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = col; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, s + 3); ctx.lineTo(0, -s * 0.6); ctx.lineWidth = 1.1; ctx.stroke();
-    ctx.restore();
+    __M_restore(ctx);
   }
 
   // ---------- Sport middle: rev trace + engine ----------
@@ -1451,14 +1517,14 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // ---- static: cached in the Sport chrome ----
   function drawBayStatic() {
     const E = ENG, cx = E.cx;
-    ctx.save(); ctx.translate(E.cx, E.pose.y); ctx.scale(E.pose.s, E.pose.s); ctx.translate(-E.cx, -230);
+    __M_save(ctx); __M_translate(ctx, E.cx, E.pose.y); __M_scale(ctx, E.pose.s, E.pose.s); __M_translate(ctx, -E.cx, -230);
     ctx.lineJoin = "round"; ctx.lineCap = "round";
     // spotlight
-    ctx.save(); ctx.translate(cx, 250); ctx.scale(1.3, 1.3);
+    __M_save(ctx); __M_translate(ctx, cx, 250); __M_scale(ctx, 1.3, 1.3);
     const sp = ctx.createRadialGradient(0, 0, 10, 0, 0, 120);
     sp.addColorStop(0, btint(0.08)); sp.addColorStop(1, btint(0));
     ctx.fillStyle = sp; ctx.beginPath(); ctx.arc(0, 0, 120, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    __M_restore(ctx);
     // intake (behind): plenum on the back side, runners curving over into the head, air duct
     ctx.beginPath(); ctx.moveTo(E.plenum.x + 14, E.plenum.y); ctx.quadraticCurveTo(E.plenum.x + 20, 150, cx - 54, 176);
     ctx.lineWidth = 12; ctx.strokeStyle = BAYC; ctx.stroke(); ctx.lineWidth = 9.6; ctx.strokeStyle = GLASS; ctx.stroke(); ctx.strokeStyle = btint(0.16); ctx.stroke();
@@ -1518,7 +1584,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     text("P/S", P.x - 4, P.y + P.r + 14, 6.5, btint(0.65), { align: "center", base: "middle", ls: 1 });
     text("A/C", AC.x, AC.y + AC.r + 11, 6.5, btint(0.65), { align: "center", base: "middle", ls: 1 });
     ctx.lineCap = "butt";
-    ctx.restore();
+    __M_restore(ctx);
   }
 
   // ---- live ----
@@ -1529,7 +1595,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function drawBayLive() {
     const E = ENG, now = performance.now() / 1000;
-    ctx.save(); ctx.translate(E.cx, E.pose.y); ctx.scale(E.pose.s, E.pose.s); ctx.translate(-E.cx, -230);
+    __M_save(ctx); __M_translate(ctx, E.cx, E.pose.y); __M_scale(ctx, E.pose.s, E.pose.s); __M_translate(ctx, -E.cx, -230);
     const h = smooth(engHeat), hot = mixHex(BAYC, "#ff1f2a", h);
     // engine heat: head, block and cover warm toward red; outline glows when hot
     if (h > 0.01) {
@@ -1564,13 +1630,13 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // shift flash
     if (shiftFlash && now - shiftFlash.t < 0.9) {
       const a = 1 - (now - shiftFlash.t) / 0.9, x = R + 10, y = 300;
-      ctx.save(); ctx.globalAlpha *= a; ctx.beginPath();
+      __M_save(ctx); ctx.globalAlpha *= a; ctx.beginPath();
       if (shiftFlash.up) { ctx.moveTo(x, y - 7); ctx.lineTo(x + 7, y + 5); ctx.lineTo(x - 7, y + 5); }
       else { ctx.moveTo(x, y + 7); ctx.lineTo(x + 7, y - 5); ctx.lineTo(x - 7, y - 5); }
       ctx.closePath(); ctx.fillStyle = shiftFlash.up ? "#ffffff" : "#ffb020"; ctx.fill();
-      text("SHIFT", x, y + 15, 7, "#c9b2a6", { align: "center", base: "middle", ls: 1 }); ctx.restore();
+      text("SHIFT", x, y + 15, 7, "#c9b2a6", { align: "center", base: "middle", ls: 1 }); __M_restore(ctx);
     }
-  ctx.restore();
+  __M_restore(ctx);
   }
 
   // Normal: the road scene in the right panel, with charging and engine-temp lines under the title
@@ -1591,13 +1657,13 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function withAlpha(alpha, fn) {
     if (alpha <= 0.001) return;
-    ctx.save(); ctx.globalAlpha *= alpha; fn(); ctx.restore();     // multiplies, so nested fades combine
+    __M_save(ctx); ctx.globalAlpha *= alpha; fn(); __M_restore(ctx);     // multiplies, so nested fades combine
   }
   function atPose(p, ox, oy, fn) {
-    ctx.save();
-    ctx.translate(p.x, p.y); ctx.scale(p.s, p.s); ctx.translate(-ox, -oy);
+    __M_save(ctx);
+    __M_translate(ctx, p.x, p.y); __M_scale(ctx, p.s, p.s); __M_translate(ctx, -ox, -oy);
     fn();
-    ctx.restore();
+    __M_restore(ctx);
   }
 
   // Everything that never moves (background, texture, panels, band, accent lines,
@@ -1613,8 +1679,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function drawChrome() {
     drawFloor();
-    ctx.save(); enterGroup();
-    if (chromeMode === "sport") { drawSportStatic(); ctx.restore(); return; }
+    __M_save(ctx); enterGroup();
+    if (chromeMode === "sport") { drawSportStatic(); __M_restore(ctx); return; }
     sidePanelPath(false); fillPanel(null, PT, PB);
     sidePanelPath(true);  fillPanel(null, PT, PB);
     const accentArc = (a0, a1, ccw) => {
@@ -1627,7 +1693,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     ctx.beginPath(); ctx.moveTo(W - 250, PT); ctx.lineTo(W - 150, PT); glowStroke(rgba(TH.accent, 0.8), 2, 6);
     if (chromeMode === "normal") drawRoadStatic(NROAD);
     drawTrips();
-    ctx.restore();
+    __M_restore(ctx);
   }
   // Paint the static layers into any 2D context (the web caches below, or a Qt Canvas layer).
   // clip (optional) = [x, y, w, h]: only that part is needed, so skip the rest.
@@ -1638,11 +1704,11 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   function paintChromeTo(c, mode, clip) {
     const main = ctx, saved = Object.assign({}, TH);
     ctx = c;
-    if (clip) { ctx.save(); ctx.beginPath(); ctx.rect(clip[0], clip[1], clip[2], clip[3]); ctx.clip(); }
+    if (clip) { __M_save(ctx); ctx.beginPath(); ctx.rect(clip[0], clip[1], clip[2], clip[3]); ctx.clip(); }
     Object.assign(TH, THEMES[mode]); chromePass = true; chromeMode = mode; texPattern = null;
     drawChrome();
     chromePass = false; texPattern = null;
-    if (clip) ctx.restore();
+    if (clip) __M_restore(ctx);
     ctx = main; Object.assign(TH, saved);
   }
   let bgCache = null, bgScale = 0;
@@ -1683,7 +1749,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       g.addColorStop(0.82, rgba(TH.accent, a)); g.addColorStop(1, rgba(TH.accent, 0));
       return g;
     };
-    ctx.save(); ctx.beginPath(); ctx.rect(0, F.top, W, F.bottom - F.top); ctx.clip();
+    __M_save(ctx); ctx.beginPath(); ctx.rect(0, F.top, W, F.bottom - F.top); ctx.clip();
     ctx.lineWidth = 1;
     // cross lines, evenly spaced in depth (1/distance) so they bunch up toward the far edge
     for (let i = 1; i <= F.rows; i++) {
@@ -1701,7 +1767,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       ctx.globalAlpha = edge;
       ctx.beginPath(); ctx.moveTo(xt, F.top); ctx.lineTo(xb, F.bottom); ctx.strokeStyle = vg; ctx.stroke();
     }
-    ctx.restore();
+    __M_restore(ctx);
     // far edge: a glowing line like the accent lines up top, fading out at the ends
     const hg = ctx.createLinearGradient(0, 0, W, 0);
     hg.addColorStop(0, rgba(TH.accent, 0)); hg.addColorStop(0.2, rgba(TH.accent, 0.75));
@@ -1757,7 +1823,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     if (!iconCache[key]) {
       const px = Math.ceil(LAMP_SIZE * curScale), cv2 = document.createElement("canvas");
       cv2.width = cv2.height = px;
-      const main = ctx; ctx = cv2.getContext("2d"); ctx.scale(px / 24, px / 24);
+      const main = ctx; ctx = cv2.getContext("2d"); __M_scale(ctx, px / 24, px / 24);
       drawGlyph(g, col); ctx = main;
       iconCache[key] = cv2;
     }
@@ -1784,9 +1850,9 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
         ctx.beginPath(); __ellipse(ctx, L.x, LAMP_BASE + 1.5, 11, 2.4, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(col, 0.3); ctx.fill();
       }
       __drawImage(ctx, img, x, LAMP_BASE - s, s, s);
-      ctx.save(); ctx.globalAlpha *= on ? 0.3 : 0.14;           // squashed reflection on the floor
-      ctx.translate(0, LAMP_BASE + 1); ctx.scale(1, -0.35); __drawImage(ctx, img, x, -s, s, s);
-      ctx.restore();
+      __M_save(ctx); ctx.globalAlpha *= on ? 0.3 : 0.14;           // squashed reflection on the floor
+      __M_translate(ctx, 0, LAMP_BASE + 1); __M_scale(ctx, 1, -0.35); __drawImage(ctx, img, x, -s, s, s);
+      __M_restore(ctx);
     }
   }
 
@@ -1814,10 +1880,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const clipRects = (...r) => () => { ctx.beginPath(); for (const q of r) ctx.rect(q[0], q[1], q[2], q[3]); };
   function blit(img, x, y, w, h, tf, alpha, clip) {
     if (alpha <= 0.002) return;
-    ctx.save(); if (clip) clip(); else { ctx.beginPath(); ctx.rect(x, y, w, h); } ctx.clip();
-    ctx.globalAlpha *= alpha; if (tf) tf(); __drawImage(ctx, img, 0, 0, W, H); ctx.restore();
+    __M_save(ctx); if (clip) clip(); else { ctx.beginPath(); ctx.rect(x, y, w, h); } ctx.clip();
+    ctx.globalAlpha *= alpha; if (tf) tf(); __drawImage(ctx, img, 0, 0, W, H); __M_restore(ctx);
   }
-  const zoomAbout = (cx, cy, z) => () => { ctx.translate(cx, cy); ctx.scale(z, z); ctx.translate(-cx, -cy); };
+  const zoomAbout = (cx, cy, z) => () => { __M_translate(ctx, cx, cy); __M_scale(ctx, z, z); __M_translate(ctx, -cx, -cy); };
   function drawSportSwitchChrome(k) {
     const other = chromeFor(MODE.to === "sport" ? MODE.from : MODE.to), sp = chromeFor("sport");
     const from = chromeFor(MODE.from), to = chromeFor(MODE.to);
@@ -1827,8 +1893,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     blit(other, 0, 0, W, SW_CUT, zoomAbout(W / 2, toScreenY(220), SPX.zoom), SPX.other);
     // Sport: brackets slide in/out at the sides, the engine scales in the middle
     const off = SPX.off * GS;
-    blit(sp, 0, 0, 0, 0, () => ctx.translate(-off, 0), SPX.sport, clipRects([0, 0, W / 2, SW_TOP], [0, SW_TOP, SW_L, SW_CUT - SW_TOP]));
-    blit(sp, 0, 0, 0, 0, () => ctx.translate(off, 0), SPX.sport, clipRects([W / 2, 0, W / 2, SW_TOP], [SW_R, SW_TOP, W - SW_R, SW_CUT - SW_TOP]));
+    blit(sp, 0, 0, 0, 0, () => __M_translate(ctx, -off, 0), SPX.sport, clipRects([0, 0, W / 2, SW_TOP], [0, SW_TOP, SW_L, SW_CUT - SW_TOP]));
+    blit(sp, 0, 0, 0, 0, () => __M_translate(ctx, off, 0), SPX.sport, clipRects([W / 2, 0, W / 2, SW_TOP], [SW_R, SW_TOP, W - SW_R, SW_CUT - SW_TOP]));
     blit(sp, 0, 0, 0, 0, zoomAbout(W / 2, toScreenY(ENG.pose.y), SPX.eng), SPX.sport, clipRects([SW_L, SW_TOP, SW_R - SW_L, SW_CUT - SW_TOP]));
   }
   // Qt build: the chrome is shown as clipped pieces of each mode's static layer, each with its own
@@ -1858,7 +1924,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     return st;
   }
   // content-space versions for the live layers (already inside enterGroup)
-  function withTf(alpha, tf, fn) { if (alpha <= 0.002) return; ctx.save(); ctx.globalAlpha *= alpha; tf(); fn(); ctx.restore(); }
+  function withTf(alpha, tf, fn) { if (alpha <= 0.002) return; __M_save(ctx); ctx.globalAlpha *= alpha; tf(); fn(); __M_restore(ctx); }
   const otherTf = () => zoomAbout(W / 2, 220, SPX.zoom)();
 
   // Sport at redline: the top half of the background pulses red, fading out towards the middle
@@ -1893,7 +1959,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       }
     });
 
-    ctx.save(); enterGroup();
+    __M_save(ctx); enterGroup();
     // ---------- speedometer (under the tach, or on top of it once Eco is past halfway) ----------
     const notSport = SPX.other, sportIn = SPX.sport;
     const speedo = () => withTf(A.gauges * notSport, otherTf, () => atPose(placed("speed"), SCX, SCY, () => drawSpeedGauge(false)));
@@ -1930,8 +1996,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // ---------- Sport layout (live parts) ----------
     if (sportIn > 0.002) {
       const a = A.dash * sportIn;
-      withTf(a, () => ctx.translate(-SPX.off, 0), drawSportLeft);
-      withTf(a, () => ctx.translate(SPX.off, 0), drawSportRight);
+      withTf(a, () => __M_translate(ctx, -SPX.off, 0), drawSportLeft);
+      withTf(a, () => __M_translate(ctx, SPX.off, 0), drawSportRight);
       withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), drawSportMiddle);
     }
     if (ecoA > 0.5) speedo();
@@ -1950,14 +2016,14 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // mode switch: a ring of light rolls out from the tach
     if (MT < 1.1 && A.dash > 0.5) {
       const rp = MT / 1.1, rr = DR + (1 - Math.pow(1 - rp, 3)) * 780;
-      ctx.save();
+      __M_save(ctx);
       ctx.globalCompositeOperation = "lighter";
       ctx.globalAlpha = 0.5 * Math.pow(1 - rp, 1.5);
       ctx.beginPath(); ctx.arc(DCX, DCY, rr, 0, Math.PI * 2);
       glowStroke(TH.accent, 3, 18);
-      ctx.restore();
+      __M_restore(ctx);
     }
-    ctx.restore();
+    __M_restore(ctx);
 
     // ---------- bottom strip ----------
     withAlpha(A.dash, () => {
@@ -1975,12 +2041,12 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       // drive mode pill
       const mLabel = THEMES[MODE.to].label + " MODE", mw = measure(mLabel, 10, 700, 2.5) + 30;
       const pp = MT < 1.3 ? Math.max(0, Math.min(1, MT / 0.5)) : 1, ps = 1 + 0.2 * Math.pow(1 - pp, 2);
-      ctx.save(); ctx.translate(DCX - 150, by + 9); ctx.scale(ps, ps); ctx.translate(-(DCX - 150), -(by + 9));
+      __M_save(ctx); __M_translate(ctx, DCX - 150, by + 9); __M_scale(ctx, ps, ps); __M_translate(ctx, -(DCX - 150), -(by + 9));
       rrect(DCX - 150 - mw / 2, by, mw, 18, 9);
       ctx.fillStyle = rgba(TH.accent, 0.12); ctx.fill();
       ctx.lineWidth = 1.2; ctx.strokeStyle = TH.accent; ctx.stroke();
       text(mLabel, DCX - 150, by + 9.5, 9, TH.accent, { weight: 700, align: "center", base: "middle", ls: 2.5 });
-      ctx.restore();
+      __M_restore(ctx);
 
       const now = new Date();
       const clock = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
@@ -1988,9 +2054,15 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       text(Math.round(S.outsideTemp) + "°C", DCX + 52, BB - 9, 13, "#9aa6b2", { base: "alphabetic" });
     });
 
+    if (!LAYERED) drawTop();
+  }
+  // Overlays above everything: the warning popup and the start-up logo.
+  // Qt draws these on their own layer, repainted only while one is showing.
+  function drawTop() {
     drawAlertPopup();
     drawLogo(A.logo, A.logoScale);
   }
+  const topActive = () => !!currentAlert || A.logo > 0.001;
   // ================= Start =================
   // ================= Sounds =================
   // Two slots, both chosen by you: "start" plays when the car powers on (with the
@@ -2274,7 +2346,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   });
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
   if (typeof __exportCluster === "function") __exportCluster({
-    step, draw, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    step, draw, drawTop, topActive, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));

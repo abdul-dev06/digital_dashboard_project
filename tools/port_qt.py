@@ -31,6 +31,17 @@ for fam in ("Rajdhani", "Quicksand", "Michroma"):
 # canvas calls that differ between the browser and Qt
 sub(r"\bctx\.drawImage\(", "__drawImage(ctx, ")
 sub(r"\bctx\.ellipse\(", "__ellipse(ctx, ")
+# text: on the live layers Qt's canvas text is very slow (each string becomes a path), so text()
+# hands strings to __text, which lists them for native Qt Text items (see qt_prelude.js / main.qml)
+sub(r"  function text\(str, x, y, size, color, opts = \{\}\) \{\n(?:    .*\n)+?  \}\n",
+    "  function text(str, x, y, size, color, opts = {}) {\n"
+    "    __text(ctx, String(str), x, y, size, color, opts.weight || 400, opts.family || FONT, opts.align || \"left\", opts.base || \"top\", opts.ls || 0);\n"
+    "  }\n")
+sub(r"  function measure\(str, size, weight = 400, ls = 0, family = FONT\) \{\n(?:    .*\n)+?  \}\n",
+    "  function measure(str, size, weight = 400, ls = 0, family = FONT) { return __measure(ctx, String(str), size, weight, ls, family); }\n")
+# transforms on the live layer are tracked so each string knows where it sits
+sub(r"\bctx\.(translate|scale|rotate|save|restore|setTransform)\((\)?)",
+    lambda m: "__M_%s(ctx%s" % (m.group(1), ")" if m.group(2) else ", "))
 sub("texPattern = texPattern || ctx.createPattern(texTile, \"repeat\");",
     "texPattern = texPattern || __pattern(ctx); if (!texPattern) return;", regex=False)
 

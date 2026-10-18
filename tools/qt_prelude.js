@@ -119,6 +119,84 @@ function __pattern(c) {
   try { return c.createPattern(__texUrl, "repeat"); } catch (e) { return null; }
 }
 
+// ---- live layers: transforms are tracked and text is handed to native Qt Text items ----
+// Qt's canvas turns every fillText into a path (slow on the Rock64), and the text barely
+// changes between frames, so on the live layers text() only records each string with the
+// transform and opacity it would have been drawn with. main.qml shows them with Text items,
+// which the GPU draws from a glyph cache and which are only touched when a string changes.
+var __L = null, __m = [1, 0, 0, 1, 0, 0], __ms = [], __T = [];
+function __beginLive(c) { __L = c; __m = [1, 0, 0, 1, 0, 0]; __ms = []; __T = []; }
+function __endLive() { __L = null; return __T; }
+function __M_save(c) { if (c === __L) __ms.push(__m.slice()); c.save(); }
+function __M_restore(c) { if (c === __L && __ms.length) __m = __ms.pop(); c.restore(); }
+function __M_translate(c, x, y) {
+  if (c === __L) { __m[4] += __m[0] * x + __m[2] * y; __m[5] += __m[1] * x + __m[3] * y; }
+  c.translate(x, y);
+}
+function __M_scale(c, sx, sy) {
+  if (c === __L) { __m[0] *= sx; __m[1] *= sx; __m[2] *= sy; __m[3] *= sy; }
+  c.scale(sx, sy);
+}
+function __M_rotate(c, a) {
+  if (c === __L) {
+    var cs = Math.cos(a), sn = Math.sin(a), m = __m;
+    __m = [m[0] * cs + m[2] * sn, m[1] * cs + m[3] * sn, m[2] * cs - m[0] * sn, m[3] * cs - m[1] * sn, m[4], m[5]];
+  }
+  c.rotate(a);
+}
+function __M_setTransform(c, a, b, cc, d, e, f) { if (c === __L) __m = [a, b, cc, d, e, f]; c.setTransform(a, b, cc, d, e, f); }
+function __text(c, s, x, y, size, color, weight, family, align, base, ls) {
+  if (c !== __L) {      // static layers and recorded images: draw it on the canvas as usual
+    c.font = weight + " " + size + "px " + family; c.fillStyle = color;
+    c.textAlign = align; c.textBaseline = base; c.fillText(s, x, y);
+    return;
+  }
+  var a = c.globalAlpha;
+  if (a <= 0.003 || s === "") return;
+  __T.push([s, x, y, size, color, weight, family, align, base, ls, a, __m[0], __m[1], __m[2], __m[3], __m[4], __m[5]]);
+}
+function __measure(c, s, size, weight, ls, family) {
+  c.font = weight + " " + size + "px " + family;
+  return c.measureText(s).width + ls * s.length;     // letter spacing is drawn by the Text items
+}
+var __colors = {}, __fonts = {};
+function __qcolor(v) {
+  if (typeof v !== "string") return "#ffffff";
+  var c = __colors[v];
+  if (c !== undefined) return c;
+  var m = /^rgba?\(([^)]*)\)$/.exec(v.replace(/\s+/g, ""));
+  if (m) { var p = m[1].split(","); c = Qt.rgba(p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? +p[3] : 1); }
+  else c = v;
+  return (__colors[v] = c);
+}
+// Show a frame's strings on a pool of Text items (each item only changes when its string does).
+// Text items have width 0, so left/centre/right alignment happens around the anchor point.
+var __pools = {};
+function __setPool(id, items) { var k = []; for (var i = 0; i < items.length; i++) k.push(""); __pools[id] = { items: items, keys: k }; }
+function __applyTexts(id, list) {
+  if (!__pools[id]) return;
+  var pool = __pools[id].items, keys = __pools[id].keys;
+  var n = Math.min(list.length, pool.length);
+  for (var i = 0; i < n; i++) {
+    var r = list[i], it = pool[i], key = r.join("|");
+    if (keys[i] === key) continue;
+    keys[i] = key;
+    var size = r[3], px = Math.max(1, Math.round(size)), k = size / px;
+    var fam = r[6].replace(/['"]/g, ""), fk = fam + "|" + px + "|" + r[5] + "|" + r[9];
+    var f = __fonts[fk] || (__fonts[fk] = Qt.font({ family: fam, pixelSize: px, weight: r[5], letterSpacing: r[9] }));
+    it.font = f; it.text = r[0]; it.color = __qcolor(r[4]); it.opacity = r[10];
+    it.horizontalAlignment = r[7] === "center" ? 4 : (r[7] === "right" || r[7] === "end") ? 2 : 1;   // AlignHCenter / AlignRight / AlignLeft
+    var b = r[8], h = it.implicitHeight;
+    var dy = (b === "top" || b === "hanging") ? 0 : b === "alphabetic" ? -it.baselineOffset : b === "middle" ? -h / 2 : -h;
+    var x = r[1], y = r[2] + k * dy;
+    it.mx = Qt.matrix4x4(r[11] * k, r[13] * k, 0, r[11] * x + r[13] * y + r[15],
+                         r[12] * k, r[14] * k, 0, r[12] * x + r[14] * y + r[16],
+                         0, 0, 1, 0, 0, 0, 0, 1);
+    it.visible = true;
+  }
+  for (var j = n; j < pool.length; j++) if (keys[j] !== "") { keys[j] = ""; pool[j].visible = false; }
+}
+
 function __setTexUrl(u) { __texUrl = u; }
 function __setMeasureCtx(c) { __measureCtx = c; }
 var __API = null;

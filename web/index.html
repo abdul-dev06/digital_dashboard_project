@@ -1984,9 +1984,15 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       text(Math.round(S.outsideTemp) + "°C", DCX + 52, BB - 9, 13, "#9aa6b2", { base: "alphabetic" });
     });
 
+    if (!LAYERED) drawTop();
+  }
+  // Overlays above everything: the warning popup and the start-up logo.
+  // Qt draws these on their own layer, repainted only while one is showing.
+  function drawTop() {
     drawAlertPopup();
     drawLogo(A.logo, A.logoScale);
   }
+  const topActive = () => !!currentAlert || A.logo > 0.001;
   // ================= Start =================
   // ================= Sounds =================
   // Two slots, both chosen by you: "start" plays when the car powers on (with the
@@ -2270,7 +2276,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   });
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
   if (typeof __exportCluster === "function") __exportCluster({
-    step, draw, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    step, draw, drawTop, topActive, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));
