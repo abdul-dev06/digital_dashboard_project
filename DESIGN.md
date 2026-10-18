@@ -16,7 +16,7 @@ Keep it updated with every design or data change (see the change log at the bott
 Everything is drawn on one canvas in a fixed 1280×480 coordinate space, scaled to the screen.
 
 **Layers, back to front (in `draw()`):**
-1. **Background layer:** dark gradient + carbon texture. Cached image, mode-independent (`backgroundLayer()`).
+1. **Background layer:** dark gradient (the carbon texture was removed 2026-10-18). Cached image, mode-independent (`backgroundLayer()`).
 2. **Sport redline wash:** red gradient over the top half when Sport is at redline. Sits behind all UI.
 3. **Chrome layer:** everything static for the current mode: panels, strip, accent lines, trip card shape, Sport tracks/ticks/numbers/road edges. Cached one image per mode (`chromeFor(mode)`), cross-faded on mode change.
 4. **Live content** (inside the enlarged group, see below): gauges, needles, fills, rings, car, road motion, text values, turn arrows, mode-switch ripple.
@@ -38,7 +38,6 @@ Everything is drawn on one canvas in a fixed 1280×480 coordinate space, scaled 
   - it swaps `ctx.drawImage(` → `__drawImage(ctx, ` (so recorded offscreen canvases can be replayed) and `ctx.ellipse(` → `__ellipse(ctx, ` (Qt's ellipse takes a bounding box);
   - it simplifies font family strings to single names, and quotes `'DejaVu Sans'` (Qt 6.8 drops the space from an unquoted multi-word family, can't find it, keeps the previous font and logs a warning on every call);
   - it rewrites `text()` / `measure()` to call `__text` / `__measure`, and `ctx.translate/scale/rotate/save/restore/setTransform(` to `__M_*(ctx, …)` so the live layer's transform is tracked;
-  - it points the carbon texture at `qt/texture.png`, which it generates with the same seeded pattern.
 - **Prelude stand-ins:**
   - `document`/`window` elements are stubs that keep their click listeners, so keyboard shortcuts work unchanged;
   - `performance.now`, timers, `localStorage` (in memory for now) and `Audio` (silent for now);
@@ -56,7 +55,8 @@ Everything is drawn on one canvas in a fixed 1280×480 coordinate space, scaled 
 - Test against the Rock64's Qt: `pip install PySide6-Essentials==6.8.2`, render offscreen with an empty fontconfig (the Rock64 has no system fonts) so font problems show up. Moving text to Text items cut the live layer's code time per frame from about 14 ms to about 2 ms (PC, Normal mode, engine running).
 - Gauges are split into a face (`drawSpeedFace`, `drawDialFace`: shade, unlit ticks, numbers, hub) and a live part (`drawSpeedLive`, `drawDialLive`: lit ticks drawn over the unlit ones, needle, readout). Ticks and ring segments are stroked in batches, one stroke per width and colour (`strokeBatch`).
 - Code time per frame on a PC, Qt 6.8.2: parked at idle 0.4 ms (was 14 ms at the start of the day), driving about 1.2 ms, the first moments of a mode switch about 2.5 ms (everything repaints while it moves).
-- **GPU fill rate is the other limit** (Mali-450): every visible layer is a transparent texture the GPU paints over the whole output. On a 4K TV every mode ran at the same low fps whatever the code time, so `qt/run.sh` sets the HDMI output to 1280x720 through `QT_QPA_EGLFS_KMS_CONFIG` (`CLUSTER_MODE` overrides it; the car's 1280x480 screen has no such mode and keeps its own).
+- **GPU fill rate is the other limit** (Mali-450): every visible layer is a transparent texture the GPU paints over the whole output. On a 4K TV every mode ran at the same low fps whatever the code time, so `qt/run.sh` sets the HDMI output to 1920x1080 through `QT_QPA_EGLFS_KMS_CONFIG` (`CLUSTER_MODE` overrides it) and `QT_SCALE_FACTOR=1.5` (`CLUSTER_SCALE`): the 1280x480 layout is drawn sharp at **1920x720, the target panel resolution** (12.3" automotive cluster), letterboxed on a TV. Canvases render at the device pixel ratio, so nothing is stretched. On a real 1920x720 panel the mode falls back to the panel's own and the cluster fills it.
+- Gauge sections pass their bounds (`SPEED_BOX`, `TACH_BOX`), and Qt sizes their canvases to that box on screen in the current pose (`__secFit`), instead of whole-screen canvases.
 - Qt's JavaScript ignores `toLocaleString` options, so numbers are formatted with `fmtNum()`.
 - To capture transitions in the headless test, slow the prelude clock (`performance.now() * 0.2` in a scratch copy): the offscreen renderer drops frames.
 

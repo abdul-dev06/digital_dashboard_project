@@ -112,13 +112,6 @@ function __ellipse(c, x, y, rx, ry) {
   if (c instanceof __RecCtx) { c.ellipse(x, y, rx, ry); return; }
   c.ellipse(x - rx, y - ry, rx * 2, ry * 2);
 }
-// carbon texture pattern from texture.png (loaded by the Canvas in main.qml)
-var __texUrl = "";
-function __pattern(c) {
-  if (!__texUrl || c instanceof __RecCtx) return null;
-  try { return c.createPattern(__texUrl, "repeat"); } catch (e) { return null; }
-}
-
 // ---- live layers: transforms are tracked and text is handed to native Qt Text items ----
 // Qt's canvas turns every fillText into a path (slow on the Rock64), and the text barely
 // changes between frames, so on the live layers text() only records each string with the
@@ -209,14 +202,30 @@ function __same(a, b) {
   for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
 }
-function __secHook(name, deps, fn, c, frameSig) {
+function __secHook(name, deps, fn, c, frameSig, bounds) {
   var s = __secs[name];
   if (!s || c !== __L) { fn(); return; }           // no canvas for it, or not on the live layer: draw in place
   var a = c.globalAlpha, full = deps.concat(frameSig || [], __m, [a]);
   s.seen = __secFrame;
   if (s.shown && __same(full, s.deps)) return;
   s.deps = full; s.fn = fn; s.m = __m.slice(); s.a = a; s.shown = true;
+  if (bounds) __secFit(s.canvas, bounds);
   s.canvas.requestPaint();
+}
+// move/resize a section's canvas to the on-screen box around its local bounds (whole pixels, on the stage)
+function __secFit(cv, b) {
+  var xs = [b[0], b[0] + b[2]], ys = [b[1], b[1] + b[3]], x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, m = __m;
+  for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++) {
+    var X = m[0] * xs[i] + m[2] * ys[j] + m[4], Y = m[1] * xs[i] + m[3] * ys[j] + m[5];
+    x0 = Math.min(x0, X); x1 = Math.max(x1, X); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y);
+  }
+  x0 = Math.max(0, Math.floor(x0) - 1); y0 = Math.max(0, Math.floor(y0) - 1);
+  x1 = Math.min(1280, Math.ceil(x1) + 1); y1 = Math.min(480, Math.ceil(y1) + 1);
+  var w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  if (cv.x !== x0) cv.x = x0;
+  if (cv.y !== y0) cv.y = y0;
+  if (cv.width !== w) cv.width = w;
+  if (cv.height !== h) cv.height = h;
 }
 function __secEndFrame() {          // sections not drawn this frame (faded out, other mode) get cleared once
   for (var k in __secs) {
@@ -244,7 +253,6 @@ function __secPaint(name, c, api, ox, oy, w, h) {   // the canvas covers (ox, oy
   return drew;
 }
 
-function __setTexUrl(u) { __texUrl = u; }
 function __setMeasureCtx(c) { __measureCtx = c; }
 var __API = null;
 function __exportCluster(api) { __API = api; }
@@ -496,38 +504,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     rrect(22, BT, W - 44, BB - BT, (BB - BT) / 2);
   }
 
-  // Background texture: a fine carbon twill with a little grain, built once as a
-  // 24x24 tile from a fixed seed so it looks identical every time.
-  const texTile = (() => {
-    const n = 24, c = document.createElement("canvas"); c.width = c.height = n;
-    const x = c.getContext("2d"), d = x.createImageData(n, n), px = d.data;
-    let seed = 1337; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    for (let yy = 0; yy < n; yy++) for (let xx = 0; xx < n; xx++) {
-      const cell = (Math.floor(xx / 6) + Math.floor(yy / 6)) % 2;          // 2x2 weave cells
-      const along = cell ? (xx % 6) : (yy % 6);                            // strands run across or down
-      const shade = 0.5 + 0.5 * Math.sin((along / 6) * Math.PI);           // rounded strand
-      const v = 255 * (0.35 + 0.45 * shade) + (rnd() - 0.5) * 40;
-      const i = (yy * n + xx) * 4;
-      px[i] = px[i + 1] = px[i + 2] = Math.max(0, Math.min(255, v));
-      px[i + 3] = 255;
-    }
-    x.putImageData(d, 0, 0);
-    return c;
-  })();
-  let texPattern = null;
-  function texture(alpha) {
-    texPattern = texPattern || __pattern(ctx); if (!texPattern) return;
-    __M_save(ctx);
-    ctx.globalAlpha *= alpha;
-    ctx.fillStyle = texPattern; ctx.fill();
-    __M_restore(ctx);
-  }
-
   function fillPanel(pathFn, top, bottom) {
     const g = ctx.createLinearGradient(0, top, 0, bottom);
     g.addColorStop(0, TH.panelTop); g.addColorStop(1, "#07090c");
     ctx.fillStyle = g; ctx.fill();
-    texture(0.07);
     ctx.lineWidth = 1.5; ctx.strokeStyle = "#1d252e"; ctx.stroke();
   }
   // Rock64-friendly glow: two wide see-through strokes under the core line.
@@ -1754,7 +1734,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     __M_restore(ctx);
   }
 
-  // Everything that never moves (background, texture, panels, band, accent lines,
+  // Everything that never moves (background, panels, band, accent lines,
   // trip card shape) is drawn once per drive mode into an image and reused.
   // On the Rock64 these become plain pre-rendered images in Qt.
   let chromeMode = "normal", chromePass = false, curScale = 1, chromeScale = 0;
@@ -1763,7 +1743,6 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const bg = ctx.createLinearGradient(0, 0, 0, H);
     bg.addColorStop(0, "#05070a"); bg.addColorStop(1, "#010203");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-    ctx.beginPath(); ctx.rect(0, 0, W, H); texture(0.035);
   }
   function drawChrome() {
     drawFloor();
@@ -1787,15 +1766,15 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // clip (optional) = [x, y, w, h]: only that part is needed, so skip the rest.
   function paintBackgroundTo(c) {
     const main = ctx; ctx = c;
-    texPattern = null; drawBackground(); texPattern = null; ctx = main;
+    drawBackground(); ctx = main;
   }
   function paintChromeTo(c, mode, clip) {
     const main = ctx, saved = Object.assign({}, TH);
     ctx = c;
     if (clip) { __M_save(ctx); ctx.beginPath(); ctx.rect(clip[0], clip[1], clip[2], clip[3]); ctx.clip(); }
-    Object.assign(TH, THEMES[mode]); chromePass = true; chromeMode = mode; texPattern = null;
+    Object.assign(TH, THEMES[mode]); chromePass = true; chromeMode = mode;
     drawChrome();
-    chromePass = false; texPattern = null;
+    chromePass = false;
     if (clip) __M_restore(ctx);
     ctx = main; Object.assign(TH, saved);
   }
@@ -2027,8 +2006,12 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // away. Qt gives each its own canvas and repaints it only when the deps, the theme or its
   // position/opacity change, so a parked car doesn't redraw every gauge every frame.
   // deps must cover everything the section's drawing reads (rounded to what is visible).
+  // bounds (optional) = [x, y, w, h] the section draws within, in its own coordinates: Qt then
+  // sizes its canvas to just that box on screen (fewer pixels to draw, upload and composite).
   let sectionHook = null, frameSig = null;
-  function section(name, deps, fn) { if (sectionHook) sectionHook(name, deps, fn, ctx, frameSig); else fn(); }
+  function section(name, deps, fn, bounds) { if (sectionHook) sectionHook(name, deps, fn, ctx, frameSig, bounds); else fn(); }
+  const SPEED_BOX = [SCX - SR - 24, SCY - SR - 24, 2 * (SR + 24), 2 * (SR + 24)];   // includes the drop shade
+  const TACH_BOX = [DCX - DR - 28, DCY - DR - 28, 2 * (DR + 28), 2 * (DR + 28)];
   function draw() {
     const lamp = A.lamps;
     if (sectionHook) frameSig = [modeK, ecoA, sportA, TH.accent, TH.tick, TH.needle, TH.redband, TH.car];
@@ -2058,8 +2041,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     // ---------- speedometer (under the tach, or on top of it once Eco is past halfway) ----------
     const notSport = SPX.other, sportIn = SPX.sport;
     const speedo = () => withTf(A.gauges * notSport, otherTf, () => atPose(placed("speed"), SCX, SCY,
-      () => { section("speedFace", [], drawSpeedFace);
-              section("speed", [Math.round(S.speed * 20), Math.round(S.realSpeed || 0)], () => drawSpeedLive(false)); }));
+      () => { section("speedFace", [], drawSpeedFace, SPEED_BOX);
+              section("speed", [Math.round(S.speed * 20), Math.round(S.realSpeed || 0)], () => drawSpeedLive(false), SPEED_BOX); }));
     if (ecoA <= 0.5) speedo();
 
     // ---------- dash: side content ----------
@@ -2102,8 +2085,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
 
     // ---------- tachometer (fades out in Eco) ----------
     withTf(A.gauges * (1 - ecoA) * notSport, otherTf, () => atPose(placed("tach"), DCX, DCY,
-      () => { section("tachFace", [], drawDialFace);
-              section("tach", [Math.round(S.rpm / 5), into("eco", 0.8)], () => drawDialLive(false)); }));
+      () => { section("tachFace", [], drawDialFace, TACH_BOX);
+              section("tach", [Math.round(S.rpm / 5), into("eco", 0.8)], () => drawDialLive(false), TACH_BOX); }));
 
     // ---------- Sport layout (live parts) ----------
     if (sportIn > 0.002) {

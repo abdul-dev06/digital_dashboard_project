@@ -41,7 +41,6 @@ Window {
     FontLoader { source: "fonts/Michroma-Regular.ttf" }
 
     Component.onCompleted: {
-        C.__setTexUrl(Qt.resolvedUrl("texture.png").toString());
         api.setLayered(true);
         api.setSectionHook(C.__secHook);
         for (var si = 0; si < sections.count; si++) {
@@ -68,8 +67,7 @@ Window {
             id: bg
             anchors.fill: parent
             opacity: { win.frameNo; return api.dash(); }
-            Component.onCompleted: loadImage(Qt.resolvedUrl("texture.png"))
-            onImageLoaded: requestPaint()
+            Component.onCompleted: requestPaint()
             onPaint: { var c = getContext("2d"); C.__setMeasureCtx(c); api.paintBackgroundTo(c); }
         }
 
@@ -103,8 +101,7 @@ Window {
                         Scale { origin.x: piece.st.ox; origin.y: piece.st.oy; xScale: piece.st.s; yScale: piece.st.s },
                         Translate { x: piece.st.tx }
                     ]
-                    Component.onCompleted: loadImage(Qt.resolvedUrl("texture.png"))
-                    onImageLoaded: requestPaint()
+                    Component.onCompleted: requestPaint()
                     onPaint: {
                         var c = getContext("2d"); C.__setMeasureCtx(c);
                         var m = piece.modelData;
