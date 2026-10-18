@@ -1,0 +1,2278 @@
+<title>Elantra Cluster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Quicksand:wght@400;500;600&family=Michroma&display=swap">
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one 1280x480 cluster canvas, scaled to the page width, with a small control row beneath. Single dark look on purpose (it's a dashboard at night). */
+:root {
+  --bg: #030405;
+  --panel: #0b0e12;
+  --line: #1c232b;
+  --fg: #e8ecf0;
+  --muted: #7d8996;
+  --accent: #ff2d3f;
+  --ui: "DejaVu Sans", Verdana, "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui);
+  padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+}
+.wrap { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.screen {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 1280 / 480;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #000;
+}
+canvas { display: block; width: 100%; height: 100%; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button {
+  font: inherit; font-size: 13px; letter-spacing: 0.04em;
+  color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 9px 14px; cursor: pointer;
+}
+button:hover { border-color: #2d3741; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: #3d8bff; color: #8fbcff; }
+.note { color: var(--muted); font-size: 12px; margin: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"][data-mode="eco"] { color: #2fe0a6; background: #0d1a16; }
+.seg button[aria-pressed="true"][data-mode="normal"] { color: #ff5060; background: #1a0e10; }
+.seg button[aria-pressed="true"][data-mode="sport"] { color: #ff7a45; background: #1c110c; }
+.drive { gap: 10px; }
+.tests button { font-size: 12px; padding: 7px 12px; }
+.tests button[aria-pressed="true"] { border-color: #ffb020; color: #ffc65a; }
+/* Kiosk view (add ?kiosk to the address): only the cluster, filling the screen, no cursor. Used on the Rock64. */
+html.kiosk body { margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; cursor: none; overflow: hidden; background: #000; }
+html.kiosk .wrap { max-width: none; width: min(100vw, calc(100vh * 1280 / 480)); gap: 0; }
+html.kiosk .wrap > :not(.screen) { display: none; }
+html.kiosk .screen { border: 0; border-radius: 0; }
+.filebtn { position: relative; font-size: 13px; letter-spacing: 0.04em; color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 14px; cursor: pointer; }
+.filebtn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.gear { min-width: 44px; text-align: center; font-size: 26px; font-weight: 300; font-variant-numeric: tabular-nums; }
+.shift { min-width: 84px; }
+.gas {
+  flex: 1 1 220px; min-height: 64px; font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  background: linear-gradient(#141a21, #0c1015);
+}
+.gas.on { border-color: #ff5060; color: #ff7a85; box-shadow: 0 0 18px rgba(255,80,96,0.25) inset; }
+@media (orientation: portrait) and (max-width: 700px) { .rotate { display: block; } }
+.rotate { display: none; }
+</style>
+
+<div class="wrap">
+  <div class="screen"><canvas id="cluster" width="1280" height="480" aria-label="Simulated Elantra instrument cluster"></canvas></div>
+  <div class="controls">
+    <button id="keyBtn" type="button">Key on</button>
+    <button id="engBtn" type="button">Start engine</button>
+    <label class="filebtn" for="logoIn">Use my logo
+      <input id="logoIn" type="file" accept="image/*">
+    </label>
+    <label class="filebtn" for="logoRedIn">Redline logo
+      <input id="logoRedIn" type="file" accept="image/*">
+    </label>
+    <label class="filebtn" for="sndStartIn">Startup sound
+      <input id="sndStartIn" type="file" accept="audio/*">
+    </label>
+    <label class="filebtn" for="sndAlertIn">Alert sound
+      <input id="sndAlertIn" type="file" accept="audio/*">
+    </label>
+    <span class="seg" role="group" aria-label="Drive mode">
+      <button type="button" data-mode="eco" aria-pressed="false">Eco</button>
+      <button type="button" data-mode="normal" aria-pressed="true">Normal</button>
+      <button type="button" data-mode="sport" aria-pressed="false">Sport</button>
+    </span>
+  </div>
+  <div class="controls drive" aria-label="Test drive">
+    <button id="downBtn" type="button" class="shift">− Down</button>
+    <output id="gearOut" class="gear" aria-live="polite">N</output>
+    <button id="upBtn" type="button" class="shift">Up +</button>
+    <button id="gasBtn" type="button" class="gas">Hold to rev</button>
+    <span id="driveMsg" class="note"></span>
+  </div>
+  <p class="note rotate">Turn your phone sideways for a bigger view.</p>
+  <div class="controls tests" aria-label="Test actions">
+    <span class="note">Tests</span>
+    <button type="button" id="tCold">Cold start</button>
+    <button type="button" id="tHot" aria-pressed="false">Overheat</button>
+    <button type="button" id="tCel" aria-pressed="false">Check engine</button>
+    <button type="button" id="tFill">Filled up</button>
+    <button type="button" id="tIce" aria-pressed="false">Icy outside</button>
+    <button type="button" id="tLink" aria-pressed="false">OBD lost</button>
+  </div>
+  <p class="note" id="perf"></p>
+  <p class="note">Test drive: hold the rev button (or Space), shift with the buttons or the arrow keys. It is a toy 5-speed manual just for feel; the real car will feed rpm and speed over OBD2.</p>
+</div>
+
+<script>
+if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add("kiosk");
+(() => {
+  // ================= Car config =================
+  // Change these and everything else follows: dial range, red zone, eco band,
+  // Sport logo fade, rev limiter, sweep.
+  const CFG = {
+    redline: 6500,      // rpm
+    idle: 760,          // rpm
+    speedMax: 220,      // km/h at the end of the speedometer
+    ecoBand: [0.185, 0.40],   // shift-early band, as fractions of redline
+    ecoHeavy: 0.60,           // Eco economy bar: above this fraction of redline reads as heavy
+    logoFullAt: 0.96,         // Sport: logo fully visible at this fraction of redline
+    logoShowBelow: 1000,      // Sport: logo starts appearing this many rpm below redline (hidden below that)
+    logoScale: 1.6,           // Sport: logo size over the engine
+    limiterOver: 200,         // rev limiter sits this far above redline
+    chargeVolts: 13.2,        // battery voltage at/above this = alternator charging (adapter AT RV reading)
+    tankLitres: 55,           // fuel tank size
+    afr: 14.7,                // stoichiometric air/fuel ratio for petrol
+    fuelDensity: 745,         // g per litre of petrol
+    defaultL100: 8.6,         // L/100 km used for range until the trip has its own average
+    operatingTemp: 88,        // °C: engine counts as "cold" until it reaches this
+    overheatMargin: 5,        // °C over operating temp = overheating
+    coldRevFraction: 0.55,    // while cold, revving past this fraction of redline triggers a warning
+    alertSeconds: 7,          // how long a warning note stays on screen
+    traceSeconds: 24,         // Sport rev trace: seconds of history shown
+    traceHz: 10,              // rev trace / shift detection sample rate (matches realistic OBD rate)
+    shiftStep: 0.18,          // rpm/speed ratio must change by this much to count as a shift
+    shiftMinSpeed: 10,        // km/h: below this the ratio isn't trusted (converter slip)
+    roadPxPerKmh: 1.6,        // lane-line scroll speed under the car
+    offRpm: 50,               // below this the engine is off (key on, engine off)
+    runRpm: 400,              // above this the engine is running; between the two it is cranking
+    coldLampOff: 50,          // °C: blue coolant lamp goes out above this
+    lowVolts: 12.2,           // running below this for 5 s = charging fault (battery lamp + alert)
+    lowFuel: 0.12,            // fuel lamp at/below this fraction of the tank
+    iceTemp: 3                // °C: ice warning lamp at/below this outside temperature
+  };
+  const REDLINE = CFG.redline;
+  const MAXRPM = Math.ceil(REDLINE / 1000 + 1) * 1000;   // dial runs at least 1000 rpm past redline
+  const LIMIT = REDLINE + CFG.limiterOver;
+  const OP_TEMP = CFG.operatingTemp, HOT_TEMP = OP_TEMP + CFG.overheatMargin;
+  const COLD_REV = REDLINE * CFG.coldRevFraction;
+  const COOLANT_MIN = 40, COOLANT_MAX = HOT_TEMP + 25;        // coolant ring range
+
+  // ================= Static design state =================
+  // Fixed example values to design against. Only the key-on sweep animates.
+  // Live values. In the car each comes from the source noted in DESIGN.md (OBD2 PID,
+  // adapter command or calculation); here the toy drivetrain and test buttons fill them in.
+  const VIEW = {
+    speed: 0, rpm: CFG.idle,
+    coolant: 89, intakeTemp: 21, outsideTemp: 7, maf: 2.4, batteryVolts: 12.9,
+    engineLoad: 16, throttle: 7, timing: 6.5, lambda: 1.0, cat1: 420, cat2: 360,
+    fuel: 0.58, tripA: 148.7, tripB: 1204.3, tripTime: 0, tripDist: 0,
+    tripFuel: 0, lph: 0, l100: null, avgL100: null, range: 0
+  };
+  const S = Object.assign({}, VIEW, {
+    leftTurn: false, rightTurn: false, checkEngine: false, obdLink: true
+  });
+
+  // ================= Power-on sequence =================
+  // 1. black, logo fades in and out
+  // 2. both dials fade in side by side and sweep
+  // 3. dials glide into place while the rest of the dash fades in
+  // 4. bulb check on the warning lamps, small rings sweep, needles settle at 0 (engine off)
+  // The engine is started separately; see ENGINE below.
+  const T = {
+    logoIn: [0.25, 1.25], logoOut: [2.0, 2.6],
+    gaugesIn: [2.35, 3.05], sweep: [3.0, 4.4],
+    move: [4.5, 5.45], dashIn: [4.75, 5.8],
+    lamps: [4.75, 6.5], settle: [5.4, 6.15],
+    miniUp: [5.55, 6.2], miniDown: [6.2, 6.85],
+    end: 6.9
+  };
+  const clamp01 = x => Math.max(0, Math.min(1, x));
+  const seg = (t, [a, b]) => clamp01((t - a) / (b - a));
+  const smooth = x => x * x * (3 - 2 * x);
+  const easeInOut = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  const easeOut = x => 1 - Math.pow(1 - x, 3);
+  const lerp = (a, b, k) => a + (b - a) * k;
+
+  // Where the dials sit during the intro (side by side, slightly smaller)
+  const INTRO = { tach: { x: 776, y: 240, s: 0.82 }, speed: { x: 454, y: 240, s: 0.82 } };
+  const FINAL = { tach: { x: 640, y: 212, s: 1 },    speed: { x: 322, y: 262, s: 1 } };
+  const ECO_POSE = { tach: { x: 640, y: 212, s: 0.9 }, speed: { x: 640, y: 212, s: 1.47 } };   // speedo grows into the centre
+
+  const A = { logo: 0, logoScale: 1, gauges: 0, dash: 0, move: 0, lamps: false, miniUp: 0, miniDown: 0 };
+
+  // Returns true while still animating.
+  function animate(t) {
+    // logo
+    const li = easeOut(seg(t, T.logoIn)), lo = smooth(seg(t, T.logoOut));
+    A.logo = li * (1 - lo);
+    A.logoScale = lerp(0.94, 1, li) + 0.04 * lo;
+
+    // dials
+    A.gauges = smooth(seg(t, T.gaugesIn));
+    const sp = seg(t, T.sweep);
+    const s = smooth(sp < 0.5 ? sp * 2 : (1 - sp) * 2);
+    A.move = easeInOut(seg(t, T.move));
+    const st = easeInOut(seg(t, T.settle));
+    S.realSpeed = VIEW.speed;
+    if (t < T.sweep[1]) { S.rpm = MAXRPM * s; S.speed = CFG.speedMax * s; }
+    else { S.rpm = D.rpm * st; S.speed = D.speed * st; }     // key on: engine still off, so it settles at 0
+
+    // dash
+    A.dash = smooth(seg(t, T.dashIn));
+    A.lamps = t >= T.lamps[0] && t < T.lamps[1];
+    A.miniUp = smooth(seg(t, T.miniUp));
+    A.miniDown = smooth(seg(t, T.miniDown));
+    return t < T.end;
+  }
+
+  // ================= Drawing =================
+  // Layout: the RPM dial sits in the middle and everything else wraps around it.
+  // Both side panels have a concave inner edge cut on the dial's own circle, the
+  // bottom band dips under the dial the same way, and cards overlap the panels.
+  const cv = document.getElementById("cluster");
+  let ctx = cv.getContext("2d");
+  const W = 1280, H = 480;
+  const FONT = '"DejaVu Sans", Verdana, "Segoe UI", system-ui, sans-serif';
+  const RED = "#ff2d3f";
+
+  // ================= Drive modes =================
+  // Normal is the base design. Eco calms everything down to mint and adds a
+  // shift-early band on the tach. Sport warms it to orange-red and adds shift
+  // lights inside the tach. The car always powers on in Normal.
+  const THEMES = {
+    normal: { car: "#7fb4ff", accent: "#ff2d3f", tick: "#f2f4f7", needle: "#ff5060", panelTop: "#0d1116", redband: "#d1162b", label: "NORMAL" },
+    eco:    { car: "#5ff0c0", accent: "#2fe0a6", tick: "#e3fff4", needle: "#3cf0b4", panelTop: "#0a1513", redband: "#5a1a22", label: "ECO" },
+    sport:  { car: "#ff7a3d", accent: "#ff5a1f", tick: "#fff0e6", needle: "#ff3b1f", panelTop: "#170d0c", redband: "#ff1f3a", label: "SPORT" }
+  };
+  // Gauge numerals per mode: family, weights (dial / scale / hub), size factor
+  const NUMFONTS = {
+    normal: { family: "'Rajdhani', 'DejaVu Sans', sans-serif",  dial: 600, scale: 600, hub: 700, size: 1.12 },
+    eco:    { family: "'Quicksand', 'DejaVu Sans', sans-serif", dial: 500, scale: 600, hub: 600, size: 1.0 },
+    sport:  { family: "'Michroma', 'DejaVu Sans', sans-serif",  dial: 400, scale: 400, hub: 400, size: 0.78 }
+  };
+  // swap at the midpoint of a mode change, while the colours are mid-fade
+  // During a mode change both faces are drawn, old fading out and new fading in.
+  function withNumFonts(fn) {
+    const k = smooth(modeK);
+    if (k >= 1 || MODE.from === MODE.to) { fn(NUMFONTS[MODE.to]); return; }
+    for (const [m, a] of [[MODE.from, 1 - k], [MODE.to, k]]) {
+      ctx.save(); ctx.globalAlpha *= a; fn(NUMFONTS[m]); ctx.restore();
+    }
+  }
+  const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const mixHex = (a, b, k) => { const x = hexRgb(a), y = hexRgb(b);
+    return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * k).toString(16).padStart(2, "0")).join(""); };
+  const rgba = (h, a) => { const [r, g, b] = hexRgb(h); return `rgba(${r},${g},${b},${a})`; };
+  const MODE = { from: "normal", to: "normal", t0: -1e9, dur: 0.6 };
+  // Switching to/from Sport: the outgoing layout eases away (Normal/Eco zoom slightly toward you,
+  // Sport's brackets slide out to the sides and the engine shrinks), then the incoming one arrives
+  // the opposite way. Only transforms + alpha on cached images, so it costs about one extra blit.
+  const SPORT_SWITCH = { dur: 0.85, outEnd: 0.65, inStart: 0.25, slide: 90, zoom: 0.08, engineFrom: 0.82 };
+  const SPX = { active: false, sport: 0, other: 1, off: 0, eng: 1, zoom: 1 };
+  function sportTransition() {
+    const toS = MODE.to === "sport", fromS = MODE.from === "sport";
+    if (toS === fromS || modeK >= 1) return Object.assign(SPX, { active: false, sport: toS ? 1 : 0, other: toS ? 0 : 1, off: 0, eng: 1, zoom: 1 });
+    const C = SPORT_SWITCH, p = modeK;
+    const outP = Math.max(0, Math.min(1, p / C.outEnd)), inP = Math.max(0, Math.min(1, (p - C.inStart) / (1 - C.inStart)));
+    const outA = 1 - smooth(outP), inA = smooth(inP);
+    const away = outP * outP, arrive = 1 - (1 - Math.pow(1 - inP, 3));     // leave accelerating, arrive decelerating
+    if (toS) return Object.assign(SPX, { active: true, sport: inA, other: outA, off: C.slide * arrive, eng: lerp(1, C.engineFrom, arrive), zoom: 1 + C.zoom * away });
+    return Object.assign(SPX, { active: true, sport: outA, other: inA, off: C.slide * away, eng: lerp(1, C.engineFrom, away), zoom: 1 + C.zoom * arrive });
+  }
+  let TH = Object.assign({}, THEMES.normal), modeK = 1, ecoA = 0, sportA = 0, MT = 1e9;
+  const into = (m, d) => MODE.to === m ? 1 - Math.pow(1 - Math.max(0, Math.min(1, MT / d)), 3) : 1;   // eased 0..1 entering mode m
+  function updateTheme(now) {
+    modeK = Math.min(1, (now - MODE.t0) / MODE.dur);
+    const k = modeK * modeK * (3 - 2 * modeK);
+    const a = THEMES[MODE.from], b = THEMES[MODE.to];
+    for (const key of ["car", "accent", "tick", "needle", "panelTop", "redband"]) TH[key] = mixHex(a[key], b[key], k);
+    const amt = m => (MODE.from === m ? 1 - k : 0) + (MODE.to === m ? k : 0);
+    sportTransition();
+    // during a switch to/from Sport the other layout keeps its own shape and just leaves/arrives as a whole
+    ecoA = SPX.active ? ((MODE.from === "eco" || MODE.to === "eco") ? 1 : 0) : amt("eco");
+    sportA = SPX.sport;
+    MT = now - MODE.t0;
+    return modeK < 1 || MT < 2.9;
+  }
+
+  // Dial + wrap geometry
+  const DCX = 640, DCY = 212, DR = 194;
+  const WRAP = 214;                       // radius of the cut-outs around the dial
+  const PT = 34, PB = 404;                // side panel top / bottom (content coordinates)
+  const PANEL_OUT = 52;                   // outer edge of the side panels
+  const BT = 446, BB = 474;               // bottom strip top / bottom (screen coordinates): just fits the lamps
+  // Everything above the strip is drawn 8% larger to fill the space the slim strip frees up.
+  const GS = 1.08, G_TOP = 8, G_SRC_TOP = 14;
+  function enterGroup() { ctx.translate(W / 2, G_TOP); ctx.scale(GS, GS); ctx.translate(-W / 2, -G_SRC_TOP); }
+  const ang = v => 180 + 250 * Math.max(0, Math.min(1, v / MAXRPM));
+  const toRad = a => (a - 90) * Math.PI / 180;
+  const wrapX = y => Math.sqrt(Math.max(0, WRAP * WRAP - (y - DCY) * (y - DCY)));   // half-width of the cut at y
+
+  function fitCanvas() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = cv.clientWidth || W;
+    const scale = (w / W) * dpr;
+    cv.width = Math.round(W * scale);
+    cv.height = Math.round(H * scale);
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    curScale = scale;
+  }
+
+  function rrect(x, y, w, h, r) {
+    r = Math.min(r, h / 2, w / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function text(str, x, y, size, color, opts = {}) {
+    ctx.font = `${opts.weight || 400} ${size}px ${opts.family || FONT}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = opts.align || "left";
+    ctx.textBaseline = opts.base || "top";
+    if ("letterSpacing" in ctx) ctx.letterSpacing = (opts.ls || 0) + "px";
+    ctx.fillText(String(str), x, y);
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+  }
+  function measure(str, size, weight = 400, ls = 0, family = FONT) {
+    ctx.font = `${weight} ${size}px ${family}`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = ls + "px";
+    const w = ctx.measureText(String(str)).width;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    return w;
+  }
+  const fmtTime = s => { const m = Math.floor(s / 60), h = Math.floor(m / 60), mm = m % 60; return h + ":" + (mm < 10 ? "0" : "") + mm; };
+
+  // ---- Shapes ----
+  // Left panel: bulging outer edge, concave inner edge on the dial circle.
+  // mirror = true builds the right panel.
+  function sidePanelPath(mirror) {
+    const X = x => mirror ? W - x : x;
+    const topIn = DCX - wrapX(PT), botIn = DCX - wrapX(PB);
+    const aTop = Math.atan2(PT - DCY, topIn - DCX), aBot = Math.atan2(PB - DCY, botIn - DCX);
+    ctx.beginPath();
+    ctx.moveTo(X(124), PT);
+    ctx.lineTo(X(topIn - 6), PT);
+    ctx.quadraticCurveTo(X(topIn), PT, X(topIn + 1), PT + 2);
+    if (!mirror) ctx.arc(DCX, DCY, WRAP, aTop, aBot, true);
+    else ctx.arc(DCX, DCY, WRAP, Math.PI - aTop, Math.PI - aBot, false);
+    ctx.quadraticCurveTo(X(botIn - 4), PB, X(botIn - 14), PB);
+    ctx.lineTo(X(96), PB);
+    ctx.bezierCurveTo(X(PANEL_OUT + 22), PB, X(PANEL_OUT), 330, X(PANEL_OUT), 240);
+    ctx.bezierCurveTo(X(PANEL_OUT), 120, X(PANEL_OUT + 22), PT, X(124), PT);
+    ctx.closePath();
+  }
+  function bandPath() {                   // slim pill across the bottom
+    rrect(22, BT, W - 44, BB - BT, (BB - BT) / 2);
+  }
+
+  // Background texture: a fine carbon twill with a little grain, built once as a
+  // 24x24 tile from a fixed seed so it looks identical every time.
+  const texTile = (() => {
+    const n = 24, c = document.createElement("canvas"); c.width = c.height = n;
+    const x = c.getContext("2d"), d = x.createImageData(n, n), px = d.data;
+    let seed = 1337; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let yy = 0; yy < n; yy++) for (let xx = 0; xx < n; xx++) {
+      const cell = (Math.floor(xx / 6) + Math.floor(yy / 6)) % 2;          // 2x2 weave cells
+      const along = cell ? (xx % 6) : (yy % 6);                            // strands run across or down
+      const shade = 0.5 + 0.5 * Math.sin((along / 6) * Math.PI);           // rounded strand
+      const v = 255 * (0.35 + 0.45 * shade) + (rnd() - 0.5) * 40;
+      const i = (yy * n + xx) * 4;
+      px[i] = px[i + 1] = px[i + 2] = Math.max(0, Math.min(255, v));
+      px[i + 3] = 255;
+    }
+    x.putImageData(d, 0, 0);
+    return c;
+  })();
+  let texPattern = null;
+  function texture(alpha) {
+    texPattern = texPattern || ctx.createPattern(texTile, "repeat");
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.fillStyle = texPattern; ctx.fill();
+    ctx.restore();
+  }
+
+  function fillPanel(pathFn, top, bottom) {
+    const g = ctx.createLinearGradient(0, top, 0, bottom);
+    g.addColorStop(0, TH.panelTop); g.addColorStop(1, "#07090c");
+    ctx.fillStyle = g; ctx.fill();
+    texture(0.07);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "#1d252e"; ctx.stroke();
+  }
+  // Rock64-friendly glow: two wide see-through strokes under the core line.
+  // No blur filter, so it costs about the same as three plain lines.
+  function glowStroke(color, width, blur) {
+    ctx.save();
+    const a0 = ctx.globalAlpha;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = a0 * 0.10; ctx.lineWidth = width + blur * 1.3; ctx.stroke();
+    ctx.globalAlpha = a0 * 0.22; ctx.lineWidth = width + blur * 0.55; ctx.stroke();
+    ctx.globalAlpha = a0; ctx.lineWidth = width; ctx.stroke();
+    ctx.restore();
+  }
+
+
+  // Car top view: one pre-drawn image per drive mode (plain images in Qt).
+  //   normal: cool blue wireframe
+  //   eco:    mint, lighter fill
+  //   sport:  orange, twin racing stripes, bigger tyres, brighter tail lights
+  const CAR_W = 100, CAR_H = 206;
+  function buildCar(mode) {
+    const w = CAR_W, h = CAR_H, k = 2;
+    const cv2 = document.createElement("canvas"); cv2.width = w * k; cv2.height = h * k;
+    const c = cv2.getContext("2d");
+    c.scale(k, k);
+    const line = THEMES[mode].car, sport = mode === "sport", eco = mode === "eco";
+    const tint = a => rgba(line, a);
+    const rr = (x, y, ww, hh, r) => {
+      c.beginPath(); c.moveTo(x + r, y);
+      c.arcTo(x + ww, y, x + ww, y + hh, r); c.arcTo(x + ww, y + hh, x, y + hh, r);
+      c.arcTo(x, y + hh, x, y, r); c.arcTo(x, y, x + ww, y, r); c.closePath();
+    };
+    const quad = p => { c.beginPath(); c.moveTo(p[0] * w, p[1] * h); for (let i = 2; i < p.length; i += 2) c.lineTo(p[i] * w, p[i + 1] * h); c.closePath(); };
+    // tyres
+    const tw = sport ? 0.16 : 0.14, th = sport ? 0.14 : 0.13;
+    c.fillStyle = "#1b2027";
+    [[0.02, 0.14], [0.98 - tw, 0.14], [0.02, 0.72], [0.98 - tw, 0.72]].forEach(([x, y]) => { rr(x * w, y * h, tw * w, th * h, 4); c.fill(); });
+    // body
+    const g = c.createLinearGradient(0, 0, w, 0);
+    const f = eco ? 0.7 : 1;
+    g.addColorStop(0, tint(0.10 * f)); g.addColorStop(0.5, tint(0.22 * f)); g.addColorStop(1, tint(0.10 * f));
+    c.fillStyle = g; c.strokeStyle = line; c.lineWidth = 1.6;
+    rr(0.09 * w, 0.02 * h, 0.82 * w, 0.96 * h, 0.24 * w); c.fill(); c.stroke();
+    // mirrors
+    c.fillStyle = tint(0.35);
+    rr(0, 0.33 * h, 0.1 * w, 0.035 * h, 3); c.fill();
+    rr(0.9 * w, 0.33 * h, 0.1 * w, 0.035 * h, 3); c.fill();
+    // hood creases
+    c.strokeStyle = tint(0.45); c.lineWidth = 1;
+    c.beginPath(); c.moveTo(0.32 * w, 0.06 * h); c.lineTo(0.30 * w, 0.29 * h); c.stroke();
+    c.beginPath(); c.moveTo(0.68 * w, 0.06 * h); c.lineTo(0.70 * w, 0.29 * h); c.stroke();
+    // sport: twin stripes nose to tail
+    if (sport) {
+      c.fillStyle = tint(0.55);
+      for (const sx of [0.42, 0.53]) {
+        c.fillRect(sx * w, 0.03 * h, 0.05 * w, 0.28 * h);
+        c.fillRect(sx * w, 0.43 * h, 0.05 * w, 0.23 * h);
+        c.fillRect(sx * w, 0.77 * h, 0.05 * w, 0.2 * h);
+      }
+    }
+    // glass
+    c.fillStyle = "rgba(14,22,32,0.92)"; c.strokeStyle = line; c.lineWidth = 1.3;
+    quad([0.17, 0.31, 0.83, 0.31, 0.75, 0.42, 0.25, 0.42]); c.fill(); c.stroke();
+    quad([0.25, 0.67, 0.75, 0.67, 0.81, 0.76, 0.19, 0.76]); c.fill(); c.stroke();
+    quad([0.14, 0.43, 0.20, 0.44, 0.20, 0.65, 0.14, 0.66]); c.fill();
+    quad([0.86, 0.43, 0.80, 0.44, 0.80, 0.65, 0.86, 0.66]); c.fill();
+    // roof
+    c.fillStyle = tint(0.16);
+    rr(0.24 * w, 0.43 * h, 0.52 * w, 0.23 * h, 6); c.fill(); c.stroke();
+    if (sport) { c.fillStyle = tint(0.55); for (const sx of [0.42, 0.53]) c.fillRect(sx * w, 0.45 * h, 0.05 * w, 0.19 * h); }
+    // lights
+    c.lineWidth = 3; c.lineCap = "round";
+    c.strokeStyle = "#e8f1ff";
+    c.beginPath(); c.moveTo(0.18 * w, 0.045 * h); c.lineTo(0.33 * w, 0.03 * h); c.stroke();
+    c.beginPath(); c.moveTo(0.82 * w, 0.045 * h); c.lineTo(0.67 * w, 0.03 * h); c.stroke();
+    c.strokeStyle = RED; c.lineWidth = sport ? 3.6 : 3;
+    c.beginPath(); c.moveTo(0.16 * w, 0.955 * h); c.lineTo(0.32 * w, 0.97 * h); c.stroke();
+    c.beginPath(); c.moveTo(0.84 * w, 0.955 * h); c.lineTo(0.68 * w, 0.97 * h); c.stroke();
+    return cv2;
+  }
+  const carImgs = {};
+  const carFor = m => carImgs[m] || (carImgs[m] = buildCar(m));
+
+  // ---- Pieces ----
+  function telltale(x, y, w, label, color, on) {
+    rrect(x, y, w, 18, 9);
+    if (on) { ctx.save(); ctx.globalAlpha *= 0.18; ctx.fillStyle = color; ctx.fill(); ctx.restore(); }
+    ctx.lineWidth = 1.2; ctx.strokeStyle = on ? color : "#1c232b"; ctx.stroke();
+    text(label, x + w / 2, y + 9.5, 9, on ? color : "#2a333d", { weight: 700, align: "center", base: "middle", ls: 1 });
+  }
+
+  // Metric pill on the status panel
+  function metricPill(x, y, right, label, value, unit, ratio, warn) {
+    const w = right - x, h = 42;
+    rrect(x, y, w, h, 21);
+    ctx.fillStyle = "#0f141a"; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = "#1e262f"; ctx.stroke();
+    // level fill as a soft band inside the pill
+    const fw = Math.max(0, Math.min(1, ratio)) * (w - 8);
+    if (fw > 2) {
+      ctx.save(); rrect(x, y, w, h, 21); ctx.clip();
+      const g = ctx.createLinearGradient(x, 0, x + fw, 0);
+      g.addColorStop(0, warn ? "rgba(255,45,63,0.05)" : "rgba(201,210,220,0.03)");
+      g.addColorStop(1, warn ? "rgba(255,45,63,0.28)" : "rgba(201,210,220,0.09)");
+      ctx.fillStyle = g; ctx.fillRect(x, y, fw + 4, h);
+      const bw = Math.max(0, Math.min(1, ratio)) * (w - 40);
+      rrect(x + 20, y + h - 7, w - 40, 2, 1); ctx.fillStyle = "#1e262f"; ctx.fill();
+      rrect(x + 20, y + h - 7, bw, 2, 1); ctx.fillStyle = warn ? RED : "#c9d2dc"; ctx.fill();
+      ctx.restore();
+    }
+    text(label, x + 20, y + h / 2 - 2, 10, "#7d8996", { base: "middle", ls: 1.5 });
+    const uw = measure(unit, 11);
+    text(unit, right - 18, y + 27, 11, "#7d8996", { align: "right", base: "alphabetic" });
+    text(value, right - 18 - uw - 3, y + 28, 19, warn ? RED : "#f2f4f7", { align: "right", base: "alphabetic" });
+  }
+
+  function miniGauge(o) {
+    // Segmented ring: no bezel, no needle. Lit segments show the level, a
+    // glowing tip marks the exact value, the number sits in the middle.
+    const { cx, cy, r, min, max, value, label, unit, digits, warnFrom, warnTo, warnColor, tint } = o;
+    const A0 = 135, SW = 270;                            // canvas degrees, gap at the bottom
+    const k = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    const inWarn = warnFrom !== undefined && value >= Math.min(warnFrom, warnTo) && value <= Math.max(warnFrom, warnTo);
+    const lit = inWarn ? warnColor : (tint || "#e8ecf0");
+    const N = 30, gap = 2.2;                              // segments, degrees between them
+    const segSw = (SW - gap * (N - 1)) / N;
+    const wStart = warnFrom !== undefined ? (Math.min(warnFrom, warnTo) - min) / (max - min) : 2;
+    const wEnd = warnFrom !== undefined ? (Math.max(warnFrom, warnTo) - min) / (max - min) : 2;
+
+    // soft glow behind the lit part
+    if (k > 0.01) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, r, A0 * Math.PI / 180, (A0 + SW * k) * Math.PI / 180);
+      ctx.lineWidth = 10; ctx.strokeStyle = lit; ctx.globalAlpha *= 0.07; ctx.stroke();
+      ctx.restore();
+    }
+    for (let i = 0; i < N; i++) {
+      const a0 = A0 + i * (segSw + gap), mid = (i + 0.5) / N;
+      ctx.beginPath(); ctx.arc(cx, cy, r, a0 * Math.PI / 180, (a0 + segSw) * Math.PI / 180);
+      ctx.lineWidth = 6;
+      const zone = mid >= wStart && mid <= wEnd;
+      if (mid <= k) ctx.strokeStyle = zone ? warnColor : lit;
+      else ctx.strokeStyle = zone ? (warnColor === RED ? "#3a1016" : "#3a2a0c") : "#182028";
+      ctx.stroke();
+    }
+    // tip
+    const ta = (A0 + SW * k) * Math.PI / 180;
+    const tx = cx + Math.cos(ta) * r, ty = cy + Math.sin(ta) * r;
+    ctx.beginPath(); ctx.arc(tx, ty, 8, 0, Math.PI * 2); ctx.fillStyle = rgba(lit.length === 7 ? lit : "#ffffff", 0.18); ctx.fill();
+    ctx.beginPath(); ctx.arc(tx, ty, 4.5, 0, Math.PI * 2); ctx.fillStyle = "#ffffff"; ctx.fill();
+
+    const dv = o._pct ? value * 100 : value;
+    const shown = digits === 0 ? Math.round(dv) : dv.toFixed(digits);
+    const vw = measure(shown, 24, 300), uw = measure(unit, 10);
+    const x0 = cx - (vw + 3 + uw) / 2;
+    text(shown, x0, cy + 6, 24, inWarn ? warnColor : "#f4f6f8", { weight: 300, base: "alphabetic" });
+    text(unit, x0 + vw + 3, cy + 6, 10, "#7d8996", { base: "alphabetic" });
+    text(label, cx, cy + r - 2, 8, "#7d8996", { align: "center", base: "middle", ls: 2 });
+  }
+
+  // Speedometer: 270° sweep starting straight down (6 o'clock), clockwise up the
+  // left side and over the top, ending at 3 o'clock where it tucks under the tach.
+  const SCX = 322, SCY = 262, SR = 128, SMAX = CFG.speedMax;
+  const sAng = v => 180 + 270 * Math.max(0, Math.min(1, v / SMAX));   // deg from 12 o'clock
+  function drawSpeedGauge(lamp) {
+    ctx.save();
+    const sh = ctx.createRadialGradient(SCX, SCY, SR, SCX, SCY, SR + 20);          // drop shade as a gradient, no blur
+    sh.addColorStop(0, "rgba(0,0,0,0.55)"); sh.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.beginPath(); ctx.arc(SCX, SCY, SR + 20, 0, Math.PI * 2); ctx.fillStyle = sh; ctx.fill();
+    ctx.beginPath(); ctx.arc(SCX, SCY, SR + 6, 0, Math.PI * 2);
+    const fg = ctx.createRadialGradient(SCX, SCY - 30, 10, SCX, SCY, SR);
+    fg.addColorStop(0, "#0d1116"); fg.addColorStop(1, "#050608");
+    ctx.fillStyle = fg; ctx.fill();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(SCX, SCY, SR + 6, 0, Math.PI * 2);
+    ctx.lineWidth = 2; ctx.strokeStyle = "#202830"; ctx.stroke();
+
+    // faint track for the whole 270°
+    ctx.beginPath(); ctx.arc(SCX, SCY, SR - 2, toRad(sAng(0)), toRad(sAng(SMAX)));
+    ctx.lineWidth = 2; ctx.strokeStyle = "#1a2028"; ctx.stroke();
+
+    const v = lamp ? SMAX : S.speed;
+    for (let s = 0; s <= SMAX; s += 5) {
+      const major = s % 20 === 0, mid = s % 10 === 0;
+      const lit = s <= v;
+      const outer = SR - 8, len = major ? 16 : (mid ? 10 : 6), a = toRad(sAng(s));
+      ctx.beginPath();
+      ctx.moveTo(SCX + Math.cos(a) * (outer - len), SCY + Math.sin(a) * (outer - len));
+      ctx.lineTo(SCX + Math.cos(a) * outer, SCY + Math.sin(a) * outer);
+      ctx.lineWidth = major ? 3 : (mid ? 2 : 1.2);
+      ctx.strokeStyle = lit ? TH.tick : "#262d35";
+      ctx.stroke();
+      if (major && s % 40 === 0) {
+        const lr = SR - 38;
+        withNumFonts(nf => text(s, SCX + Math.cos(a) * lr, SCY + Math.sin(a) * lr, Math.round(15 * nf.size), "#c4ccd4",
+             { align: "center", base: "middle", weight: nf.scale, family: nf.family }));
+      }
+    }
+
+    // needle
+    const na = toRad(sAng(v)), ca = Math.cos(na), sa = Math.sin(na);
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(SCX + ca * (SR - 12), SCY + sa * (SR - 12)); ctx.lineTo(SCX + ca * (SR * 0.52), SCY + sa * (SR * 0.52));
+    ctx.lineWidth = 10; ctx.strokeStyle = rgba(TH.needle, 0.18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(SCX + ca * (SR - 10), SCY + sa * (SR - 10)); ctx.lineTo(SCX + ca * (SR * 0.54), SCY + sa * (SR * 0.54));
+    ctx.lineWidth = 3.5; ctx.strokeStyle = TH.needle; ctx.stroke();
+    ctx.lineCap = "butt";
+
+    // digital readout in the hub
+    ctx.beginPath(); ctx.arc(SCX, SCY, SR * 0.46, 0, Math.PI * 2);
+    ctx.fillStyle = "#0b0e12"; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = "#1c232b"; ctx.stroke();
+    withNumFonts(hf => text(Math.round(S.realSpeed || 0), SCX, SCY + 14, Math.round(46 * hf.size), "#f6f8fa",
+         { weight: hf.hub, align: "center", base: "alphabetic", family: hf.family }));
+    text("km/h", SCX, SCY + 32, 11, "#7d8996", { align: "center", base: "alphabetic", ls: 1.5 });
+  }
+  function drawDial(lamp) {
+    // soft halo so the dial reads as the top layer
+    ctx.save();
+    const sh = ctx.createRadialGradient(DCX, DCY, DR, DCX, DCY, DR + 24);          // drop shade as a gradient, no blur
+    sh.addColorStop(0, "rgba(0,0,0,0.6)"); sh.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.beginPath(); ctx.arc(DCX, DCY, DR + 24, 0, Math.PI * 2); ctx.fillStyle = sh; ctx.fill();
+    ctx.beginPath(); ctx.arc(DCX, DCY, DR + 4, 0, Math.PI * 2);
+    const fg = ctx.createRadialGradient(DCX, DCY - 40, 20, DCX, DCY, DR);
+    fg.addColorStop(0, "#0d1116"); fg.addColorStop(1, "#050608");
+    ctx.fillStyle = fg; ctx.fill();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(DCX, DCY, DR + 4, 0, Math.PI * 2);
+    ctx.lineWidth = 2; ctx.strokeStyle = "#202830"; ctx.stroke();
+    ctx.beginPath(); ctx.arc(DCX, DCY, DR * 0.57, 0, Math.PI * 2);
+    ctx.lineWidth = 1; ctx.strokeStyle = "#161b21"; ctx.stroke();
+    // red band
+    ctx.beginPath(); ctx.arc(DCX, DCY, DR - 4, toRad(ang(REDLINE)), toRad(ang(MAXRPM)));
+    glowStroke(TH.redband, 7, 10);
+    // ticks (one per 100 rpm across the whole dial)
+    for (let i = 0; i <= MAXRPM / 100; i++) {
+      const v = i * 100, major = i % 10 === 0, half = i % 5 === 0, red = v >= REDLINE;
+      const lit = lamp || v <= S.rpm;
+      const len = major ? 26 : (half ? 18 : 12);
+      const outer = DR - 12, inner = outer - len, a = toRad(ang(v));
+      ctx.beginPath();
+      ctx.moveTo(DCX + Math.cos(a) * inner, DCY + Math.sin(a) * inner);
+      ctx.lineTo(DCX + Math.cos(a) * outer, DCY + Math.sin(a) * outer);
+      ctx.lineWidth = major ? 4 : (half ? 3 : 2);
+      ctx.strokeStyle = lit ? (red ? "#ff2d3f" : TH.tick) : (red ? "#4a1218" : "#262d35");
+      ctx.stroke();
+    }
+
+    // numbers
+    for (let n = 0; n <= MAXRPM / 1000; n++) {
+      const a = ang(n * 1000) * Math.PI / 180, r = DR * 0.70;
+      withNumFonts(nf => text(n, DCX + Math.sin(a) * r, DCY - Math.cos(a) * r, Math.round(34 * nf.size), n * 1000 >= REDLINE ? RED : "#e8ecf0",
+           { weight: nf.dial, align: "center", base: "middle", family: nf.family }));
+    }
+    // needle
+    {
+      const na = toRad(ang(S.rpm)), ca = Math.cos(na), sa = Math.sin(na);
+      const seg = (r0, r1) => { ctx.beginPath(); ctx.moveTo(DCX + ca * r0, DCY + sa * r0); ctx.lineTo(DCX + ca * r1, DCY + sa * r1); };
+      ctx.lineCap = "round";
+      seg(DR - 14, DR - 2 - DR * 0.5); ctx.lineWidth = 12; ctx.strokeStyle = rgba(TH.needle, 0.18); ctx.stroke();
+      const g = ctx.createLinearGradient(DCX + ca * (DR - 9), DCY + sa * (DR - 9), DCX + ca * (DR - 9 - DR * 0.48), DCY + sa * (DR - 9 - DR * 0.48));
+      g.addColorStop(0, TH.needle); g.addColorStop(1, rgba(TH.needle, 0.5));
+      seg(DR - 10, DR - 8 - DR * 0.48); ctx.lineWidth = 4; ctx.strokeStyle = g; ctx.stroke();
+      ctx.lineCap = "butt";
+      text("x1000 r/min", DCX, DCY + 40, 10, "#3d4651", { align: "center", ls: 1.5 });
+    }
+
+    // ECO: shift-early band on the track
+    if (ecoA > 0.01) {
+      const [e0, e1] = CFG.ecoBand.map(f => f * REDLINE);
+      ctx.save(); ctx.globalAlpha *= ecoA;
+      ctx.beginPath(); ctx.arc(DCX, DCY, DR - 4, toRad(ang(e0)), toRad(ang(e0 + (e1 - e0) * into("eco", 0.8))));
+      glowStroke(THEMES.eco.accent, 7, 10);
+      ctx.restore();
+    }
+
+  }
+
+
+  // ================= Sport layout: 40 / 20 / 40 =================
+  // Left: rpm on a bracket-shaped track that fills. Middle: road with the car.
+  // Right: speed on the mirrored track with a moving marker. Static parts are in
+  // the cached Sport background; only the fill, marker, road motion and numbers move.
+  // (In Qt the tracks map onto QPainterPath, using pointAtPercent / angleAtPercent.)
+  const SPT = {
+    verts: [[350, 394], [70, 266], [124, 72], [500, 46]],   // left track, bottom end to top end
+    corner: 56, band: 18,
+    road: { cx: 640, horizon: 96, bottom: 404, topHalf: 8, bottomHalf: 112 },
+    rpmStep: 500, speedStep: 10, speedLabelEvery: 20
+  };
+  function buildTrack(V, r) {
+    const raw = [V[0]];
+    const line = (a, b) => { const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3)); for (let i = 1; i <= n; i++) raw.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]); };
+    let cur = V[0];
+    for (let i = 1; i < V.length - 1; i++) {
+      const p = V[i - 1], c = V[i], n = V[i + 1];
+      const l1 = Math.hypot(c[0] - p[0], c[1] - p[1]), l2 = Math.hypot(n[0] - c[0], n[1] - c[1]);
+      const A = [c[0] - (c[0] - p[0]) / l1 * r, c[1] - (c[1] - p[1]) / l1 * r];
+      const B = [c[0] + (n[0] - c[0]) / l2 * r, c[1] + (n[1] - c[1]) / l2 * r];
+      line(cur, A);
+      for (let k = 1; k <= 16; k++) { const t = k / 16, u = 1 - t; raw.push([u * u * A[0] + 2 * u * t * c[0] + t * t * B[0], u * u * A[1] + 2 * u * t * c[1] + t * t * B[1]]); }
+      cur = B;
+    }
+    line(cur, V[V.length - 1]);
+    const cum = [0];
+    for (let i = 1; i < raw.length; i++) cum.push(cum[i - 1] + Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]));
+    const total = cum[cum.length - 1];
+    // point + inward normal at a fraction of the length (0..1); mirror = right-hand track
+    function at(f, mirror) {
+      const L = Math.max(0, Math.min(1, f)) * total;
+      let i = 1; while (i < cum.length - 1 && cum[i] < L) i++;
+      const t = (L - cum[i - 1]) / Math.max(1e-6, cum[i] - cum[i - 1]);
+      let x = raw[i - 1][0] + (raw[i][0] - raw[i - 1][0]) * t, y = raw[i - 1][1] + (raw[i][1] - raw[i - 1][1]) * t;
+      const tl = Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]) || 1;
+      const tx = (raw[i][0] - raw[i - 1][0]) / tl, ty = (raw[i][1] - raw[i - 1][1]) / tl;
+      let nx = -ty, ny = tx;
+      if (mirror) { x = W - x; nx = -nx; }
+      return { x, y, nx, ny };
+    }
+    // trace the track (or a parallel line offset along the inward normal) from f0 to f1
+    function trace(f0, f1, mirror, off = 0) {
+      const n = Math.max(2, Math.ceil((f1 - f0) * total / 4));
+      ctx.beginPath();
+      for (let k = 0; k <= n; k++) {
+        const q = at(f0 + (f1 - f0) * k / n, mirror);
+        const x = q.x + q.nx * off, y = q.y + q.ny * off;
+        k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+    }
+    return { at, trace, total };
+  }
+  const TRACK = buildTrack(SPT.verts, SPT.corner);
+
+  // static part of one bracket gauge (goes into the cached Sport background)
+  function drawTrackStatic(mirror, max, step, labelEvery, labelDiv, redFrom, font) {
+    const B = SPT.band;
+    ctx.lineJoin = "round";
+    // subtle tint filling the inside of the bracket, strongest along the track, fading toward the open side
+    TRACK.trace(0, 1, mirror, B / 2); ctx.closePath();
+    // gradient runs from the outer corner straight toward the open (closing) edge, reaching 0 exactly on it
+    const V = SPT.verts, P0 = V[0], P1 = V[V.length - 1], C0 = V[1];
+    const dl = Math.hypot(P1[0] - P0[0], P1[1] - P0[1]), nx = -(P1[1] - P0[1]) / dl, ny = (P1[0] - P0[0]) / dl;
+    const dist = (P0[0] - C0[0]) * nx + (P0[1] - C0[1]) * ny;
+    const fx = x => mirror ? W - x : x;
+    const ig = ctx.createLinearGradient(fx(C0[0]), C0[1], fx(C0[0] + nx * dist), C0[1] + ny * dist);
+    ig.addColorStop(0, rgba(TH.accent, 0.24)); ig.addColorStop(0.5, rgba(TH.accent, 0.09)); ig.addColorStop(1, rgba(TH.accent, 0));
+    ctx.fillStyle = ig; ctx.fill();
+    TRACK.trace(0, 1, mirror); ctx.lineWidth = B; ctx.strokeStyle = "#10151b"; ctx.stroke();
+    if (redFrom !== null) { TRACK.trace(redFrom / max, 1, mirror); ctx.lineWidth = B; ctx.strokeStyle = "#2a0d12"; ctx.stroke(); }
+    TRACK.trace(0, 1, mirror, -(B / 2 + 6)); glowStroke(rgba(TH.accent, 0.85), 2, 8);        // outer edge
+    TRACK.trace(0, 1, mirror, B / 2 + 1); ctx.lineWidth = 1; ctx.strokeStyle = "#232b35"; ctx.stroke();   // inner edge
+    for (let v = 0; v <= max + 1e-6; v += step) {
+      const q = TRACK.at(v / max, mirror), major = Math.abs(v / labelEvery - Math.round(v / labelEvery)) < 1e-6;
+      const red = redFrom !== null && v >= redFrom;
+      const r0 = B / 2 + 4, r1 = r0 + (major ? 12 : 6);
+      ctx.beginPath(); ctx.moveTo(q.x + q.nx * r0, q.y + q.ny * r0); ctx.lineTo(q.x + q.nx * r1, q.y + q.ny * r1);
+      ctx.lineWidth = major ? 2.5 : 1.3; ctx.strokeStyle = red ? "#ff2d3f" : (major ? "#e8ecf0" : "#5d6873"); ctx.stroke();
+      if (major) {
+        const str = String(Math.round(v / labelDiv)), fsz = Math.round(22 * font.size);
+        const half = measure(str, fsz, font.dial, 0, font.family) / 2;
+        const rl = B / 2 + 20 + half * Math.abs(q.nx) + 10 * Math.abs(q.ny);     // wide labels sit further in on the sides
+        text(str, q.x + q.nx * rl, q.y + q.ny * rl, fsz, red ? RED : "#e8ecf0",
+             { weight: font.dial, align: "center", base: "middle", family: font.family });
+      }
+    }
+  }
+  function drawRoadStatic(R) {
+    const g = ctx.createLinearGradient(0, R.horizon, 0, R.bottom);
+    g.addColorStop(0, rgba(TH.accent, 0)); g.addColorStop(1, rgba(TH.accent, 0.10));
+    ctx.beginPath();
+    ctx.moveTo(R.cx - R.topHalf, R.horizon); ctx.lineTo(R.cx + R.topHalf, R.horizon);
+    ctx.lineTo(R.cx + R.bottomHalf, R.bottom); ctx.lineTo(R.cx - R.bottomHalf, R.bottom); ctx.closePath();
+    ctx.fillStyle = "#0b0e12"; ctx.fill(); ctx.fillStyle = g; ctx.fill();
+    for (const s of [-1, 1]) {
+      const eg = ctx.createLinearGradient(0, R.horizon, 0, R.bottom);
+      eg.addColorStop(0, rgba(TH.accent, 0)); eg.addColorStop(1, rgba(TH.accent, 0.9));
+      ctx.beginPath(); ctx.moveTo(R.cx + s * R.topHalf, R.horizon); ctx.lineTo(R.cx + s * R.bottomHalf, R.bottom);
+      glowStroke(eg, 2, 6);
+    }
+  }
+  function drawSportStatic() {
+    const nf = NUMFONTS.sport;
+    drawTrackStatic(false, MAXRPM, SPT.rpmStep, 1000, 1000, REDLINE, nf);
+    drawTrackStatic(true, CFG.speedMax, SPT.speedStep, SPT.speedLabelEvery, 1, null, nf);
+    drawBayStatic();
+    text("x1000 r/min", 300, 124, 9, "#3d4651", { align: "center", ls: 1.5 });
+  }
+
+  // rear view of the car for the road (pre-drawn once)
+  // Sport middle: rev trace on top, engine (4 cylinders) below
+  const BAY = { cx: 640, top: 92, bottom: 404, left: 530, right: 750 };
+  // Normal mode: the same road + car scene sits in the right panel
+  const NROAD = { cx: 945, horizon: 116, bottom: 404, topHalf: 7, bottomHalf: 118 };
+  const REAR_W = 92, REAR_H = 58;
+  function buildRearCar(mode) {
+    const k = 2, c2 = document.createElement("canvas"); c2.width = REAR_W * k; c2.height = REAR_H * k;
+    const c = c2.getContext("2d"); c.scale(k, k);
+    const rr = (x, y, w, h, r) => { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); };
+    c.fillStyle = "#0a0c0f"; rr(4, 40, 15, 17, 3); c.fill(); rr(73, 40, 15, 17, 3); c.fill();          // tyres
+    const bg = c.createLinearGradient(0, 20, 0, 50); bg.addColorStop(0, "#3a414a"); bg.addColorStop(1, "#15191e");
+    rr(1, 22, 90, 26, 8); c.fillStyle = bg; c.fill();                                                    // body
+    c.strokeStyle = rgba(THEMES[mode].car, 0.7); c.lineWidth = 1.2; c.stroke();
+    c.beginPath(); c.moveTo(20, 3); c.lineTo(72, 3); c.quadraticCurveTo(78, 3, 82, 24); c.lineTo(10, 24); c.quadraticCurveTo(14, 3, 20, 3); c.closePath();
+    c.fillStyle = "#1c2128"; c.fill(); c.stroke();                                                       // cabin
+    c.beginPath(); c.moveTo(23, 7); c.lineTo(69, 7); c.lineTo(75, 21); c.lineTo(17, 21); c.closePath();
+    c.fillStyle = "#0b0f14"; c.fill();                                                                   // rear glass
+    c.fillStyle = "#c4ccd4"; rr(38, 37, 16, 6, 1.5); c.fill();                                           // plate
+    c.fillStyle = "#4a1218"; rr(5, 28, 24, 5, 2); c.fill(); rr(63, 28, 24, 5, 2); c.fill();              // tail light housings
+    return c2;
+  }
+  const rearImgs = {};
+  const rearCarFor = m => rearImgs[m] || (rearImgs[m] = buildRearCar(m));
+
+  let roadZ = 0, lastSpeed = 0, brakeK = 0;
+  // charging indicator: battery icon + label, cross-fading over 0.4 s when the state changes
+  function drawChargeRow(cx, sy) {
+    const ck2 = smooth(chargeK);
+    for (const [on, alpha] of [[false, 1 - ck2], [true, ck2]]) {
+      if (alpha <= 0.01) continue;
+      const label = on ? "CHARGING" : "NOT CHARGING", col = on ? "#5ee08a" : "#5d6873";
+      const lw = measure(label, 9, 400, 1.8), bx = cx - (28 + lw) / 2;
+      ctx.save(); ctx.globalAlpha *= alpha;
+      rrect(bx, sy - 6, 18, 11, 2); ctx.lineWidth = 1.3; ctx.strokeStyle = col; ctx.stroke();
+      ctx.fillStyle = col; ctx.fillRect(bx + 18, sy - 2.5, 2.5, 4);
+      if (on) {
+        ctx.beginPath(); ctx.moveTo(bx + 10, sy - 5); ctx.lineTo(bx + 6, sy + 0.5); ctx.lineTo(bx + 9, sy + 0.5);
+        ctx.lineTo(bx + 8, sy + 4.5); ctx.lineTo(bx + 12.5, sy - 1.5); ctx.lineTo(bx + 9.5, sy - 1.5); ctx.closePath(); ctx.fill();
+      } else ctx.fillRect(bx + 5, sy - 0.5, 8, 1.2);
+      text(label, bx + 28, sy, 9, col, { base: "middle", ls: 1.8 });
+      ctx.restore();
+    }
+  }
+  // advance the road, brake-light and charging state once per frame (shared by all modes)
+  function roadUpdate(dt) {
+    chargeK = Math.max(0, Math.min(1, chargeK + (S.batteryVolts >= CFG.chargeVolts ? dt : -dt) / 0.4));
+    chargeMoving = chargeK > 0 && chargeK < 1;
+    const v = S.realSpeed || 0;
+    roadZ = (roadZ + v * 0.12 * dt) % 2.6;
+    const decel = (lastSpeed - v) / Math.max(dt, 1e-3); lastSpeed = v;
+    brakeK += ((decel > 3 ? 1 : 0) - brakeK) * Math.min(1, dt * 8);
+    brakeMoving = brakeK > 0.02 && brakeK < 0.98;
+  }
+  // moving part of the road scene: centre dashes, cross lines, the car, tail lights.
+  // heat > 0 adds a blue (cold) or red (hot) glow under the car.
+  function drawRoadLive(R, carMode, heat) {
+    const yAt = d => R.horizon + (R.bottom - R.horizon) / (1 + d * 0.35);
+    const halfAt = y => R.topHalf + (R.bottomHalf - R.topHalf) * (y - R.horizon) / (R.bottom - R.horizon);
+    for (let d = -roadZ; d < 30; d += 2.6) {
+      const ya = yAt(Math.max(0, d + 1.1)), yb = yAt(Math.max(0, d));
+      if (yb <= ya) continue;
+      const fade = Math.min(1, (yb - R.horizon) / 120);
+      const wa = 1 + halfAt(ya) * 0.03, wb = 1 + halfAt(yb) * 0.03;
+      ctx.beginPath(); ctx.moveTo(R.cx - wa, ya); ctx.lineTo(R.cx + wa, ya); ctx.lineTo(R.cx + wb, yb); ctx.lineTo(R.cx - wb, yb); ctx.closePath();
+      ctx.fillStyle = rgba("#e8ecf0", 0.55 * fade); ctx.fill();
+    }
+    for (let d = -(roadZ % 1.3); d < 30; d += 1.3) {
+      const y = yAt(Math.max(0, d)); const hw = halfAt(y);
+      ctx.fillStyle = rgba(TH.accent, 0.10 * Math.min(1, (y - R.horizon) / 120));
+      ctx.fillRect(R.cx - hw, y, hw * 2, 1);
+    }
+    const cy = R.bottom - REAR_H - 8;
+    if (heat) {
+      const g = ctx.createRadialGradient(R.cx, cy + REAR_H * 0.6, 6, R.cx, cy + REAR_H * 0.6, 80);
+      g.addColorStop(0, rgba(heat > 0 ? "#ff2d3f" : "#3d8bff", 0.35 * Math.abs(heat))); g.addColorStop(1, rgba("#000000", 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(R.cx, cy + REAR_H * 0.6, 80, 34, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    const sh = ctx.createRadialGradient(R.cx, cy + REAR_H, 4, R.cx, cy + REAR_H, 60);
+    sh.addColorStop(0, "rgba(0,0,0,0.7)"); sh.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = sh; ctx.beginPath(); ctx.ellipse(R.cx, cy + REAR_H, 60, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.drawImage(rearCarFor(carMode), R.cx - REAR_W / 2, cy, REAR_W, REAR_H);
+    for (const x0 of [R.cx - REAR_W / 2 + 7, R.cx + REAR_W / 2 - 29]) {
+      ctx.beginPath(); ctx.moveTo(x0, cy + 30.5); ctx.lineTo(x0 + 20, cy + 30.5);
+      glowStroke("#ff2d3f", 3 + brakeK, 5 + 8 * brakeK);
+    }
+  }
+  // Sport live layer in three parts so each can move on its own during a mode switch
+  function drawSportLeft() {
+    const B = SPT.band;
+
+    // rpm fill
+    const fr = Math.min(S.rpm, MAXRPM) / MAXRPM, warnFrom = REDLINE * 0.9 / MAXRPM, red = REDLINE / MAXRPM;
+    ctx.lineJoin = "round";
+    const seg = (a, b, col, glow) => { if (b > a) { TRACK.trace(a, b, false); glowStroke(col, B - 4, glow); } };
+    seg(0, Math.min(fr, warnFrom), TH.accent, 6);
+    seg(warnFrom, Math.min(fr, red), "#ffb020", 7);
+    seg(red, fr, "#ff2d3f", 9);
+    if (fr > 0.005) {
+      const q = TRACK.at(fr, false);
+      ctx.beginPath(); ctx.moveTo(q.x - q.nx * (B / 2 + 2), q.y - q.ny * (B / 2 + 2)); ctx.lineTo(q.x + q.nx * (B / 2 + 2), q.y + q.ny * (B / 2 + 2));
+      glowStroke("#ffffff", 3, 6);
+    }
+
+    // vehicle info inside the left bracket
+    const row = (y, label, value, warn) => {
+      text(label, 232, y, 9, "#7d8996", { base: "alphabetic", ls: 1.5 });
+      text(value, 404, y, 16, warn ? RED : "#e8ecf0", { base: "alphabetic", align: "right" });
+      ctx.fillStyle = "#1c232b"; ctx.fillRect(232, y + 7, 172, 1);
+    };
+    row(170, "COOLANT", Math.round(S.coolant) + "°C", S.coolant > HOT_TEMP);
+    row(206, "FUEL EST", Math.round(S.fuel * 100) + "%", S.fuel < 0.12);
+    row(242, "RANGE", Math.round(S.range) + " km", S.fuel < 0.12);
+    const charging = S.batteryVolts >= CFG.chargeVolts;
+    text(charging ? "CHARGING" : "NOT CHARGING", 232, 274, 9, charging ? "#5ee08a" : "#5d6873", { base: "alphabetic", ls: 1.8 });
+  }
+  function drawSportRight() {
+    const B = SPT.band;
+    ctx.lineJoin = "round";
+    // speed marker with a short fading trail
+    const fs = Math.min(S.speed, CFG.speedMax) / CFG.speedMax;
+    const trail = 50 / TRACK.total;
+    if (fs > 0.002) {
+      const steps = 6;
+      for (let k = 0; k < steps; k++) {
+        const a = Math.max(0, fs - trail * (k + 1) / steps), b = Math.max(0, fs - trail * k / steps);
+        if (b > a) { TRACK.trace(a, b, true); ctx.lineWidth = B - 6; ctx.strokeStyle = rgba(TH.accent, 0.45 * (1 - k / steps)); ctx.stroke(); }
+      }
+    }
+    const q = TRACK.at(fs, true);
+    ctx.beginPath(); ctx.moveTo(q.x - q.nx * (B / 2 + 5), q.y - q.ny * (B / 2 + 5)); ctx.lineTo(q.x + q.nx * (B / 2 + 8), q.y + q.ny * (B / 2 + 8));
+    glowStroke("#ffffff", 4, 8);
+
+    // digital speed inside the right bracket
+    const sf = NUMFONTS.sport;
+    text(Math.round(S.realSpeed || 0), W - 300, 228, Math.round(64 * sf.size), "#f6f8fa", { weight: sf.hub, align: "center", base: "alphabetic", family: sf.family });
+    text("km/h", W - 300, 250, 11, "#7d8996", { align: "center", base: "alphabetic", ls: 2 });
+  }
+  function drawSportMiddle() {
+    drawBayLive();
+
+    // logo over the engine: hidden until close to redline, then takes over the middle
+    drawRevLogo(W / 2, ENG.pose.y + 4, CFG.logoScale, 1);
+  }
+  let brakeMoving = false;
+
+  // Logo that reacts to rpm: faint at idle, full just before redline, swaps / flashes red at redline
+  function drawRevLogo(x, y, scale, alpha) {
+    const inSport = MODE.to === "sport";
+
+      // logo: hidden until logoShowBelow rpm under redline, fully visible just before redline, flashing red at redline
+      const logoIn = inSport ? smooth(Math.max(0, Math.min(1, (MT - 0.2) / 0.5))) : 1;
+      const full = REDLINE * CFG.logoFullAt, from = REDLINE - CFG.logoShowBelow;
+      const k = smooth(Math.max(0, Math.min(1, (S.rpm - from) / Math.max(1, full - from))));
+      const atRedline = S.rpm >= REDLINE;
+      const flashOn = Math.floor(performance.now() / 110) % 2 === 0;
+      const flash = flashOn ? 1 : 0.25;
+      const vis = atRedline ? flash : k;
+      // dark veil behind the logo so it reads boldly over the engine
+      const veil = alpha * logoIn * Math.max(k, atRedline ? 1 : 0);
+      if (veil > 0.01) {
+        const r = 82 * scale, vg = ctx.createRadialGradient(x, y, r * 0.3, x, y, r);
+        vg.addColorStop(0, "rgba(5,7,10," + (0.9 * veil).toFixed(3) + ")"); vg.addColorStop(1, "rgba(5,7,10,0)");
+        ctx.fillStyle = vg; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+      // redK eases 0 -> 1 when redline is hit (fast) and back to 0 when it drops (a bit slower)
+      const nowS = performance.now() / 1000, ldt = Math.min(0.1, nowS - (logoT || nowS)); logoT = nowS;
+      redK = Math.max(0, Math.min(1, redK + (atRedline ? ldt / 0.16 : -ldt / 0.32)));
+      logoMoving = redK > 0 && redK < 1;
+      // at redline: swap to the redline logo if one is loaded, otherwise flash the main logo red
+      if (!logoRedImg) {
+        drawEmblemAt(x, y, scale * (0.95 + 0.08 * k), alpha * logoIn * vis, atRedline ? "#ff2d3f" : null, null);
+      } else {
+        // crossfade: main logo shrinks and fades out, redline logo punches in and flashes red
+        const e = smooth(redK), base = scale * (0.95 + 0.08 * k);
+        const mainVis = k;
+        drawEmblemAt(x, y, base * (1 - 0.18 * e), alpha * logoIn * mainVis * (1 - e), null, null);
+        drawEmblemAt(x, y, base * (1.18 - 0.18 * e), alpha * logoIn * e * (atRedline ? flash : 1),
+                     atRedline ? "#ff2d3f" : null, logoRedImg);
+      }
+  }
+
+  // Placeholder emblem. To use your own logo, set LOGO_SRC to an image
+  // (a data: URI or a file next to the page); it is drawn centered.
+  // Your logo is loaded from your own file (the "Use my logo" button). It is kept
+  // in this browser only. In the Qt build it is read from /opt/cluster/logo.png.
+  let logoImg = null;                 // a prepared canvas: dark background removed
+  let logoRedImg = null;              // optional second logo, shown only while at redline in Sport
+  function prepareLogo(img) {
+    const size = 360, k = size / Math.max(img.naturalWidth, img.naturalHeight);
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0, c.width, c.height);
+    const d = x.getImageData(0, 0, c.width, c.height), px = d.data;
+    for (let i = 0; i < px.length; i += 4) {           // key out near-black so it sits on the dash
+      const lum = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      px[i + 3] = Math.round(px[i + 3] * Math.max(0, Math.min(1, (lum - 18) / 40)));
+    }
+    x.putImageData(d, 0, 0);
+    return c;
+  }
+  function useLogo(src, remember, slot = "main") {
+    const img = new Image();
+    img.onload = () => {
+      const c = prepareLogo(img);
+      if (slot === "red") logoRedImg = c; else logoImg = c;
+      if (remember) { try { localStorage.setItem(slot === "red" ? "clusterLogoRed" : "clusterLogo", c.toDataURL("image/png")); } catch (e) {} }
+      draw();
+    };
+    img.src = src;
+  }
+  try {
+    const a = localStorage.getItem("clusterLogo"); if (a) useLogo(a, false, "main");
+    const b = localStorage.getItem("clusterLogoRed"); if (b) useLogo(b, false, "red");
+  } catch (e) {}
+  // Draws the emblem centred on the current origin. tint recolours it (used for the red redline flash).
+  const tintCache = new WeakMap();
+  function tinted(pic, color) {
+    let m = tintCache.get(pic); if (!m) { m = new Map(); tintCache.set(pic, m); }
+    if (!m.has(color)) {
+      const c = document.createElement("canvas"); c.width = pic.width; c.height = pic.height;
+      const t = c.getContext("2d");
+      t.drawImage(pic, 0, 0); t.globalCompositeOperation = "source-atop"; t.fillStyle = color; t.fillRect(0, 0, c.width, c.height);
+      m.set(color, c);
+    }
+    return m.get(color);
+  }
+  function emblem(tint, img) {
+    const pic = img || logoImg;
+    if (pic) {
+      const h = 118, w = h * pic.width / pic.height;
+      ctx.drawImage(tint ? tinted(pic, tint) : pic, -w / 2, -h / 2, w, h);
+      return;
+    }
+    const halo = ctx.createRadialGradient(0, 0, 10, 0, 0, 140);
+    halo.addColorStop(0, rgba(tint || "#a0bee6", 0.10)); halo.addColorStop(1, rgba(tint || "#a0bee6", 0));
+    ctx.fillStyle = halo; ctx.fillRect(-160, -160, 320, 320);
+    for (let i = 0; i < 48; i++) {
+      const a = i / 48 * Math.PI * 2 - Math.PI / 2, big = i % 4 === 0;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 52, Math.sin(a) * 52);
+      ctx.lineTo(Math.cos(a) * (big ? 62 : 58), Math.sin(a) * (big ? 62 : 58));
+      ctx.lineWidth = big ? 2.2 : 1.2;
+      ctx.strokeStyle = tint || (big ? "#e8ecf0" : "#5d6873");
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(-34, 10); ctx.quadraticCurveTo(-4, -30, 34, -14);
+    ctx.quadraticCurveTo(4, -18, -14, 14); ctx.closePath();
+    if (tint) ctx.fillStyle = tint;
+    else { const wg = ctx.createLinearGradient(-34, 0, 34, 0); wg.addColorStop(0, "#9aa6b2"); wg.addColorStop(1, "#ffffff"); ctx.fillStyle = wg; }
+    ctx.fill();
+    ctx.beginPath(); ctx.arc(20, 14, 4, 0, Math.PI * 2); ctx.fillStyle = tint || RED; ctx.fill();
+  }
+  function drawEmblemAt(x, y, scale, alpha, tint, img) {
+    if (alpha <= 0.001) return;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(x, y); ctx.scale(scale, scale);
+    emblem(tint, img || logoImg);
+    ctx.restore();
+  }
+  function drawLogo(alpha, scale) {
+    if (alpha <= 0.001) return;
+    ctx.save(); ctx.globalAlpha = alpha;
+    ctx.translate(W / 2, H / 2); ctx.scale(scale * 1.5, scale * 1.5);
+    emblem(null);
+    ctx.restore();
+  }
+
+  function drawTrips() {
+    // Crescent card: outer edge runs parallel to the panel's bulge, inner edge
+    // is cut concentric with the speedometer, so it hugs the gauge.
+    const TOP = 52, BOT = 392, IR = SR + 22;            // inner cut radius around the speedo
+    const innerX = y => SCX - Math.sqrt(Math.max(0, IR * IR - (y - SCY) * (y - SCY)));
+    const aTop = Math.atan2(TOP - SCY, innerX(TOP) - SCX), aBot = Math.atan2(BOT - SCY, innerX(BOT) - SCX);
+    if (!chromePass) { drawTripText(); return; }
+    if (chromeMode === "eco") { drawEcoTripCard(TOP, BOT); return; }
+    const path = () => {
+      ctx.beginPath();
+      // top edge runs over the speedo, then rolls down into the cut around it
+      const aS = toRad(-10), px = SCX + Math.cos(aS) * IR, py = SCY + Math.sin(aS) * IR;
+      ctx.moveTo(124, TOP);
+      ctx.lineTo(px - 26, TOP);
+      ctx.quadraticCurveTo(px, TOP, px, py);
+      ctx.arc(SCX, SCY, IR, aS, Math.atan2(BOT - 6 - SCY, innerX(BOT - 6) - SCX), true);
+      ctx.quadraticCurveTo(innerX(BOT) - 2, BOT, innerX(BOT) - 14, BOT);
+      ctx.lineTo(108, BOT);
+      ctx.bezierCurveTo(84, BOT, 66, 340, 66, 258);
+      ctx.bezierCurveTo(66, 150, 78, TOP, 124, TOP);
+      ctx.closePath();
+    };
+    path();
+    const g = ctx.createLinearGradient(66, 0, 260, 0);
+    g.addColorStop(0, "#0c1015"); g.addColorStop(1, "#121820");
+    ctx.fillStyle = g; ctx.fill();
+    path(); ctx.lineWidth = 1; ctx.strokeStyle = "#232b35"; ctx.stroke();
+    // red trace along the inner cut, fading in from the top
+    ctx.beginPath(); ctx.arc(SCX, SCY, IR, Math.atan2(TOP + 40 - SCY, innerX(TOP + 40) - SCX), Math.PI * 1.0 + 0.05, true);
+    glowStroke(rgba(TH.accent, 0.75), 1.6, 6);
+    ctx.beginPath(); ctx.moveTo(84, 214); ctx.quadraticCurveTo(140, 222, innerX(220) - 14, 216);
+    ctx.lineWidth = 1; ctx.strokeStyle = "#252e38"; ctx.stroke();
+  }
+  // Eco: the trip card takes the outer half of the left panel; its right edge
+  // bows outward, and the economy bar sits beside it.
+  const ECO_CARD_R = 228;                                  // right edge of the card at its widest
+  function drawEcoTripCard(TOP, BOT) {
+    const R = ECO_CARD_R, mid = (TOP + BOT) / 2;
+    const path = () => {
+      ctx.beginPath();
+      ctx.moveTo(124, TOP);
+      ctx.lineTo(R - 34, TOP);
+      ctx.quadraticCurveTo(R - 12, TOP, R - 8, TOP + 20);
+      ctx.bezierCurveTo(R + 2, mid - 70, R + 2, mid + 70, R - 8, BOT - 20);
+      ctx.quadraticCurveTo(R - 12, BOT, R - 34, BOT);
+      ctx.lineTo(108, BOT);
+      ctx.bezierCurveTo(84, BOT, 66, 340, 66, 258);
+      ctx.bezierCurveTo(66, 150, 78, TOP, 124, TOP);
+      ctx.closePath();
+    };
+    path();
+    const g = ctx.createLinearGradient(66, 0, R, 0);
+    g.addColorStop(0, "#0c1015"); g.addColorStop(1, "#121820");
+    ctx.fillStyle = g; ctx.fill();
+    path(); ctx.lineWidth = 1; ctx.strokeStyle = "#232b35"; ctx.stroke();
+    // accent trace down the bowed edge
+    ctx.beginPath(); ctx.moveTo(R - 5, mid - 60); ctx.bezierCurveTo(R - 1, mid - 20, R - 1, mid + 40, R - 6, mid + 100);
+    glowStroke(rgba(TH.accent, 0.75), 1.6, 6);
+    ctx.beginPath(); ctx.moveTo(84, 214); ctx.quadraticCurveTo(140, 222, R - 26, 216);
+    ctx.lineWidth = 1; ctx.strokeStyle = "#252e38"; ctx.stroke();
+  }
+  function drawTripText() {
+    const X = 84;
+    const trip = (badge, active, km, top) => {
+      ctx.beginPath(); ctx.arc(X + 8, top + 6, 8, 0, Math.PI * 2);
+      if (active) { ctx.fillStyle = TH.accent; ctx.fill(); }
+      else { ctx.lineWidth = 1.2; ctx.strokeStyle = "#4a545e"; ctx.stroke(); }
+      text(badge, X + 8, top + 6.5, 9, active ? "#ffffff" : "#7d8996", { weight: 700, align: "center", base: "middle" });
+      text("TRIP", X + 24, top + 6.5, 8, "#5d6873", { base: "middle", ls: 1.5 });
+      const v = km.toLocaleString("en-CA", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      const fs = active ? 22 : 18;
+      text(v, X, top + 38, fs, active ? "#f2f4f7" : "#aab4be", { weight: 300, base: "alphabetic" });
+      text("km", X + measure(v, fs, 300) + 4, top + 38, 9, "#5d6873", { base: "alphabetic" });
+    };
+    trip("A", true, S.tripA, 84);
+    trip("B", false, S.tripB, 146);
+
+
+    const avg = S.tripTime > 30 ? S.tripDist / (S.tripTime / 3600) : null;
+    [["THIS DRIVE", S.tripDist.toFixed(1), "km"],
+     ["DRIVE TIME", fmtTime(S.tripTime), ""],
+     ["AVG SPEED", avg === null ? "--" : Math.round(avg), "km/h"],
+     ["AVG ECONOMY", S.avgL100 === null ? "--" : S.avgL100.toFixed(1), "L/100 km"]].forEach(([l, v, u], i) => {
+      const ry = 228 + i * 40;
+      text(l, X, ry, 8, "#5d6873", { ls: 1.5 });
+      text(v, X, ry + 24, 16, "#e8ecf0", { weight: 300, base: "alphabetic" });
+      if (u) text(u, X + measure(v, 16, 300) + 4, ry + 24, 9, "#5d6873", { base: "alphabetic" });
+    });
+  }
+
+  // ---------- Car diagram: motion, hood heat, charging ----------
+  const CAR = { x: 930, top: 108 };                   // centre x and top of the car image
+  let roadOffset = 0, flowOffset = 0, carT = 0, chargeK = 0, chargeMoving = false;
+  function drawCarStatus() {
+    const now = performance.now() / 1000, dt = Math.min(0.1, now - (carT || now)); carT = now;
+    const cx = CAR.x, top = CAR.top, bottom = top + CAR_H;
+
+    // spotlight
+    const midY = top + CAR_H / 2;
+    const spot = ctx.createRadialGradient(cx, midY, 10, cx, midY, 130);
+    spot.addColorStop(0, rgba(TH.car, 0.10 + 0.04 * sportA)); spot.addColorStop(1, rgba(TH.car, 0));
+    ctx.fillStyle = spot; ctx.beginPath(); ctx.ellipse(cx, midY, 90, 140, 0, 0, Math.PI * 2); ctx.fill();
+
+    // lane lines scrolling with real speed, fading out at both ends
+    const v = S.realSpeed || 0;
+    roadOffset = (roadOffset + v * CFG.roadPxPerKmh * dt) % 34;
+    flowOffset = (flowOffset + (v * 1.4) * dt) % 1000;
+    const dash = 16 + 8 * sportA;                          // sport: longer dashes, feels faster
+    const y0 = top - 20, y1 = bottom + 20;
+    for (const lx of [cx - 60, cx + 60]) {
+      for (let y = y0 - 34 + roadOffset; y < y1; y += 34) {
+        const ya = Math.max(y0, y), yb = Math.min(y1, y + dash);
+        if (yb <= ya) continue;
+        const mid = ((ya + yb) / 2 - y0) / (y1 - y0);
+        ctx.fillStyle = rgba(mixHex("#c4ccd4", TH.car, 0.35 + 0.4 * sportA), (0.22 + 0.1 * sportA) * Math.sin(Math.PI * mid));
+        rrect(lx - 1.5, ya, 3, yb - ya, 1.5); ctx.fill();
+      }
+    }
+
+    // eco: airflow lines sliding round the body
+    if (ecoA > 0.01) {
+      ctx.save();
+      ctx.globalAlpha *= ecoA;
+      ctx.setLineDash([10, 16]); ctx.lineDashOffset = -flowOffset;
+      ctx.lineWidth = 1.5; ctx.lineCap = "round";
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 3; i++) {
+          const spread = 58 + i * 7, inner = 34 + i * 6;
+          ctx.beginPath();
+          ctx.moveTo(cx + side * 6, top - 16 - i * 4);
+          ctx.bezierCurveTo(cx + side * spread, top + 22, cx + side * spread, bottom - 30, cx + side * inner, bottom + 18 + i * 6);
+          ctx.strokeStyle = rgba(THEMES.eco.car, 0.5 - i * 0.12);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    // car image, cross-faded between modes; sport sits a little wider and lower
+    const stX = 1 + 0.06 * sportA, stY = 1 - 0.02 * sportA;
+    ctx.save();
+    ctx.translate(cx, top + CAR_H / 2); ctx.scale(stX, stY); ctx.translate(-cx, -(top + CAR_H / 2));
+    ctx.drawImage(carFor("eco"), cx - CAR_W / 2, top, CAR_W, CAR_H);   // top-view car is Eco-only now
+    ctx.restore();
+
+    // sport: tail lights glow
+    if (sportA > 0.01) {
+      ctx.save(); ctx.globalAlpha *= sportA;
+      const ty = top + CAR_H * 0.965, hw = CAR_W * stX / 2;
+      for (const side of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(cx + side * hw * 0.66, ty - 1); ctx.lineTo(cx + side * hw * 0.34, ty + 2);
+        glowStroke("#ff2d3f", 3, 10);
+      }
+      ctx.restore();
+    }
+
+    // hood heat glow: blue when cold, red when hot, nothing in between
+    const t = S.coolant;
+    const cold = Math.max(0, Math.min(1, (OP_TEMP - t) / 40));
+    const hot = Math.max(0, Math.min(1, (t - HOT_TEMP) / 8));
+    const glow = (col, amt) => {
+      if (amt <= 0.01) return;
+      const hy = top + CAR_H * 0.17;
+      const g = ctx.createRadialGradient(cx, hy, 4, cx, hy, 46);
+      g.addColorStop(0, rgba(col, 0.55 * amt)); g.addColorStop(1, rgba(col, 0));
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx, hy, 40, 34, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    };
+    const pulse = hot > 0 ? 0.7 + 0.3 * Math.sin(now * 6) : 1;
+    glow("#3d8bff", cold);
+    glow("#ff2d3f", hot * pulse);
+
+    // status lines under the car: charging always, engine temp only when it matters
+    const sy = bottom + 14;
+    drawChargeRow(cx, sy);
+
+    const tempMsg = cold > 0 ? ["WARMING UP", "#6fa8ff"] : hot > 0 ? ["ENGINE HOT", "#ff2d3f"] : null;
+    if (tempMsg) text(tempMsg[0], cx, sy + 20, 9, tempMsg[1], { align: "center", base: "middle", ls: 2 });
+  }
+
+  // Warning note: same layout for every alert. Icon, headline, body.
+  // Dims the dash slightly, sits over everything, leaves after CFG.alertSeconds.
+  function wrapLines(str, size, maxW) {
+    const words = str.split(" "), lines = []; let line = "";
+    for (const w of words) {
+      const t = line ? line + " " + w : w;
+      if (measure(t, size) > maxW && line) { lines.push(line); line = w; } else line = t;
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+  function drawAlertPopup() {
+    const a = currentAlert; if (!a) return;
+    const now = performance.now() / 1000, age = now - a.since, left = ALERT_SECS - age;
+    const vis = Math.max(0, Math.min(1, age / 0.3, left / 0.4));
+    if (vis <= 0) return;
+    const body = wrapLines(a.sub, 15, 400);
+    const cw = 540, ch = 92 + body.length * 22;
+    ctx.save();
+    ctx.globalAlpha = vis;
+    ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, H);
+    ctx.translate(W / 2 - cw / 2, H / 2 - ch / 2 + 8 * (1 - Math.min(1, age / 0.3)));   // eases up into place
+    rrect(0, 0, cw, ch, 22); ctx.fillStyle = "#0e1217"; ctx.fill();
+    rrect(0, 0, cw, ch, 22); ctx.lineWidth = 1; ctx.strokeStyle = "#262e38"; ctx.stroke();
+
+    // icon
+    const tx = 64, ty = 58;
+    ctx.beginPath(); ctx.moveTo(tx, ty - 26); ctx.lineTo(tx + 29, ty + 23); ctx.lineTo(tx - 29, ty + 23); ctx.closePath();
+    ctx.lineJoin = "round"; ctx.lineWidth = 4; ctx.strokeStyle = a.color; ctx.stroke();
+    ctx.fillStyle = a.color;
+    rrect(tx - 2.5, ty - 11, 5, 20, 2.5); ctx.fill();
+    ctx.beginPath(); ctx.arc(tx, ty + 15, 3, 0, Math.PI * 2); ctx.fill();
+
+    text(a.text, 118, 52, 22, "#f2f4f7", { weight: 600, base: "alphabetic" });
+    body.forEach((l, i) => text(l, 118, 80 + i * 22, 15, "#9aa6b2", { base: "alphabetic" }));
+    ctx.restore();
+  }
+
+  // Eco: economy bar = live rpm as a share of redline. Lower is better.
+  let econShown = 0, econT = 0;
+  function drawEconomy() {
+    const now = performance.now() / 1000, dt = Math.min(0.1, now - (econT || now)); econT = now;
+    const target = Math.max(0, Math.min(1, S.rpm / REDLINE));
+    econShown += (target - econShown) * Math.min(1, dt * 6);
+    const f = econShown, good = CFG.ecoBand[1], heavy = CFG.ecoHeavy;
+    const col = f <= good ? THEMES.eco.accent : f <= heavy ? "#ffb020" : "#ff2d3f";
+    const state = f <= good ? "EFFICIENT" : f <= heavy ? "MODERATE" : "HEAVY";
+
+    const bx = ECO_CARD_R + 46, bw = 20, by0 = 86, bh = 290, by1 = by0 + bh;
+    // track + efficient zone
+    rrect(bx, by0, bw, bh, bw / 2); ctx.fillStyle = "#10151b"; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = "#232b35"; ctx.stroke();
+    ctx.save(); rrect(bx, by0, bw, bh, bw / 2); ctx.clip();
+    ctx.fillStyle = rgba(THEMES.eco.accent, 0.10); ctx.fillRect(bx, by1 - bh * good, bw, bh * good);
+    // fill from the bottom
+    const fh = bh * f;
+    if (fh > 1) {
+      const g = ctx.createLinearGradient(0, by1, 0, by1 - fh);
+      g.addColorStop(0, rgba(col, 0.55)); g.addColorStop(1, col);
+      ctx.fillStyle = g; ctx.fillRect(bx, by1 - fh, bw, fh);
+    }
+    ctx.restore();
+    // level marker
+    const my = by1 - fh;
+    ctx.beginPath(); ctx.moveTo(bx - 6, my); ctx.lineTo(bx + bw + 6, my); glowStroke("#ffffff", 2, 5);
+    // rpm scale on the left: a mark every 500 rpm, numbered every 1000 (in thousands)
+    for (let r = 0; r <= REDLINE + 1e-6; r += 500) {
+      const y = by1 - bh * r / REDLINE, major = r % 1000 === 0;
+      ctx.fillStyle = major ? "#5d6873" : "#3d4651"; ctx.fillRect(bx - (major ? 9 : 6), y - 0.5, major ? 6 : 3, 1);
+      if (major && r > 0) text(String(r / 1000), bx - 13, y + 0.5, 9, "#5d6873", { align: "right", base: "middle", family: NUMFONTS.eco.family });
+    }
+    // readout
+    const x = bx + bw + 22;
+    text("ECONOMY", x, by0 + 2, 9, "#7d8996", { ls: 2 });
+    // rpm readout: exact at a standstill (idle), rounded to the hundred while driving so it doesn't flicker
+    const rpmNow = f * REDLINE, stopped = (S.realSpeed || 0) < 1;
+    const rpmShown = (stopped ? Math.round(rpmNow) : Math.round(rpmNow / 100) * 100).toLocaleString("en-CA");
+    text(rpmShown, x - 2, 262, 38, "#f2f4f7", { weight: 500, base: "alphabetic", family: NUMFONTS.eco.family });
+    text("RPM", x, 276, 8, "#5d6873", { ls: 1.5 });
+    // live consumption: L/100 km while moving, L/h when stopped
+    const moving = S.l100 !== null;
+    const cv = moving ? S.l100.toFixed(1) : S.lph.toFixed(1), cu = moving ? "L/100 km" : "L/h";
+    text(cv, x, 330, 20, "#e8ecf0", { weight: 500, base: "alphabetic", family: NUMFONTS.eco.family });
+    text(cu, x + measure(cv, 20, 500, 0, NUMFONTS.eco.family) + 4, 330, 9, "#7d8996", { base: "alphabetic" });
+    text(state, x, by1 - 6, 10, col, { weight: 700, base: "alphabetic", ls: 2 });
+    // green leaf beside the state word while in the efficient range (fades in/out)
+    leafK = Math.max(0, Math.min(1, leafK + (f <= good ? dt / 0.35 : -dt / 0.25)));
+    if (leafK > 0.01) drawLeaf(x + measure(state, 10, 700, 2) + 14, by1 - 10, 9, THEMES.eco.accent, smooth(leafK));
+  }
+  let leafK = 0;
+  // simple leaf icon: two curved edges, a stem and a centre vein (no blur)
+  function drawLeaf(x, y, s, col, a) {
+    ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.rotate(-0.6);
+    ctx.beginPath(); ctx.moveTo(0, s); ctx.quadraticCurveTo(s * 0.95, s * 0.1, 0, -s); ctx.quadraticCurveTo(-s * 0.95, s * 0.1, 0, s); ctx.closePath();
+    ctx.fillStyle = rgba(col, 0.35); ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = col; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, s + 3); ctx.lineTo(0, -s * 0.6); ctx.lineWidth = 1.1; ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- Sport middle: rev trace + engine ----------
+  // samples for the trace and shift detection (fixed rate, like real OBD data)
+  const traceBuf = [], shifts = [];
+  let traceAcc = 0, traceT = 0, lastShiftT = -9, crank = 0, flowZ = 0, shiftFlash = null;
+  function traceUpdate(dt) {
+    traceT += dt; traceAcc += dt;
+    crank += 2 * Math.PI * (S.rpm / 60) * dt * 0.06;        // slowed ~16x so the motion is readable
+    flowZ += (10 + S.rpm / 60) * dt;
+    bayUpdate(dt);                                            // engine heat
+    const step = 1 / CFG.traceHz;
+    while (traceAcc >= step) {
+      traceAcc -= step;
+      traceBuf.push({ t: traceT, rpm: S.rpm, v: S.realSpeed || 0 });
+      const keep = CFG.traceSeconds * CFG.traceHz + 2;
+      if (traceBuf.length > keep) traceBuf.shift();
+      detectShift();
+    }
+    while (shifts.length && traceT - shifts[0].t > CFG.traceSeconds) shifts.shift();
+  }
+  // a shift = the rpm/speed ratio steps by more than shiftStep within ~0.6 s, then holds
+  function detectShift() {
+    const n = traceBuf.length, lag = Math.round(0.6 * CFG.traceHz), hold = Math.round(0.2 * CFG.traceHz);
+    if (n < lag + hold + 1) return;
+    const now = traceBuf[n - 1], prev = traceBuf[n - 1 - lag - hold];
+    if (now.v < CFG.shiftMinSpeed || prev.v < CFG.shiftMinSpeed || now.rpm < CFG.idle + 250) return;
+    if (traceT - lastShiftT < 1.0) return;
+    const ratio = p => p.rpm / p.v;
+    const steady = traceBuf.slice(n - 1 - hold).every(p => p.v > 1 && Math.abs(ratio(p) / ratio(now) - 1) < 0.05);
+    if (!steady) return;
+    const change = ratio(now) / ratio(prev) - 1;
+    if (Math.abs(change) < CFG.shiftStep) return;
+    lastShiftT = traceT;
+    shifts.push({ t: traceBuf[n - 1 - hold].t, up: change < 0 });
+    shiftFlash = { t: performance.now() / 1000, up: change < 0 };
+  }
+  // ---------- Sport middle: realistic engine, end view from the passenger side ----------
+  // Same see-through look as the Eco car: bright outline, translucent tint, dark glass, no internals.
+  // Front of the car is to the right, intake on the back. Exhaust and cats are not drawn.
+  // The accessory drive sits on this end like a real transverse I4: crank at the bottom, alternator,
+  // power-steering pump, A/C compressor and a belt tensioner on one serpentine belt.
+  const BAYC = THEMES.sport.car, GLASS = "rgba(14,22,32,0.92)";
+  const btint = a => rgba(BAYC, a);
+  const ENG = (() => {
+    const cx = BAY.cx;
+    const pul = {                                               // belt order around the loop
+      alt:   { x: cx - 64, y: 206, r: 12, label: "ALT" },
+      idler: { x: cx + 32, y: 228, r: 7 },
+      ac:    { x: cx + 52, y: 298, r: 15, label: "A/C" },
+      crank: { x: cx,      y: 288, r: 18 },
+      ps:    { x: cx - 50, y: 262, r: 11, label: "P/S" }
+    };
+    return {
+      cx, pul, loop: [pul.alt, pul.idler, pul.ac, pul.crank, pul.ps],
+      cover: { x: cx - 60, y: 136, w: 120, h: 30 },             // valve cover
+      head: { x: cx - 66, y: 164, w: 132, h: 34 },
+      block: [[cx - 62, 198], [cx + 62, 198], [cx + 56, 292], [cx - 56, 292]],
+      pan: [[cx - 54, 292], [cx + 54, 292], [cx + 46, 322], [cx - 30, 322], [cx - 40, 306]],
+      plenum: { x: cx - 114, y: 176, w: 28, h: 74, r: 12 },
+      pose: { y: 244, s: 1.15 }                                // drawing is centred on (cx, 230) and placed/scaled here to fill the column
+    };
+  })();
+  // a solid part: dark base, horizontal tint gradient, bright outline
+  function wpart(path, x, w, lw, f) {
+    const k = f || 1;
+    path(); ctx.fillStyle = "#0a0d11"; ctx.fill();
+    const g = ctx.createLinearGradient(x, 0, x + w, 0);
+    g.addColorStop(0, btint(0.10 * k)); g.addColorStop(0.5, btint(0.24 * k)); g.addColorStop(1, btint(0.10 * k));
+    path(); ctx.fillStyle = g; ctx.fill();
+    path(); ctx.lineWidth = lw || 1.2; ctx.strokeStyle = BAYC; ctx.stroke();
+  }
+  const rr = (x, y, w, h, r) => () => rrect(x, y, w, h, r);
+  const poly = pts => () => { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); };
+  // timing-belt cover: two cam-sprocket lobes up top, narrowing down to the crank
+  const timingPath = () => {
+    const cx = ENG.cx;
+    ctx.beginPath(); ctx.moveTo(cx - 24, 300); ctx.lineTo(cx - 36, 206);
+    ctx.quadraticCurveTo(cx - 50, 196, cx - 50, 172); ctx.quadraticCurveTo(cx - 50, 146, cx - 24, 146);
+    ctx.lineTo(cx + 24, 146); ctx.quadraticCurveTo(cx + 50, 146, cx + 50, 172);
+    ctx.quadraticCurveTo(cx + 50, 196, cx + 36, 206); ctx.lineTo(cx + 24, 300);
+    ctx.quadraticCurveTo(cx, 310, cx - 24, 300); ctx.closePath();
+  };
+  // serpentine belt: outer tangents between consecutive pulleys + the wrap around each one
+  const BELT = (() => {
+    const L = ENG.loop, n = L.length;
+    const c = L.reduce((a, p) => [a[0] + p.x / n, a[1] + p.y / n], [0, 0]);
+    const seg = L.map((a, i) => {
+      const b = L[(i + 1) % n], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), al = Math.atan2(dy, dx), be = Math.acos((a.r - b.r) / d);
+      const pick = [al + be, al - be].map(t => {
+        const p1 = [a.x + Math.cos(t) * a.r, a.y + Math.sin(t) * a.r], p2 = [b.x + Math.cos(t) * b.r, b.y + Math.sin(t) * b.r];
+        return { t, p1, p2, far: Math.hypot((p1[0] + p2[0]) / 2 - c[0], (p1[1] + p2[1]) / 2 - c[1]) };
+      }).sort((u, v) => v.far - u.far)[0];
+      return pick;
+    });
+    return { seg, wraps: L.map((p, i) => ({ p, from: seg[(i - 1 + n) % n].t, to: seg[i].t })) };
+  })();
+
+  // ---- static: cached in the Sport chrome ----
+  function drawBayStatic() {
+    const E = ENG, cx = E.cx;
+    ctx.save(); ctx.translate(E.cx, E.pose.y); ctx.scale(E.pose.s, E.pose.s); ctx.translate(-E.cx, -230);
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    // spotlight
+    ctx.save(); ctx.translate(cx, 250); ctx.scale(1.3, 1.3);
+    const sp = ctx.createRadialGradient(0, 0, 10, 0, 0, 120);
+    sp.addColorStop(0, btint(0.08)); sp.addColorStop(1, btint(0));
+    ctx.fillStyle = sp; ctx.beginPath(); ctx.arc(0, 0, 120, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // intake (behind): plenum on the back side, runners curving over into the head, air duct
+    ctx.beginPath(); ctx.moveTo(E.plenum.x + 14, E.plenum.y); ctx.quadraticCurveTo(E.plenum.x + 20, 150, cx - 54, 176);
+    ctx.lineWidth = 12; ctx.strokeStyle = BAYC; ctx.stroke(); ctx.lineWidth = 9.6; ctx.strokeStyle = GLASS; ctx.stroke(); ctx.strokeStyle = btint(0.16); ctx.stroke();
+    wpart(rr(E.plenum.x, E.plenum.y, E.plenum.w, E.plenum.h, E.plenum.r), E.plenum.x, E.plenum.w, 1.3);
+    rrect(E.plenum.x + 6, E.plenum.y + E.plenum.h, 16, 10, 3); ctx.fillStyle = GLASS; ctx.fill(); ctx.lineWidth = 1.1; ctx.strokeStyle = BAYC; ctx.stroke();   // throttle body
+    ctx.beginPath(); ctx.arc(E.plenum.x + 14, E.plenum.y + E.plenum.h + 5, 4, 0, Math.PI * 2); ctx.strokeStyle = btint(0.5); ctx.stroke();
+    // oil pan, block, head, valve cover
+    wpart(poly(E.pan), cx - 54, 108, 1.3);
+    ctx.beginPath(); ctx.arc(cx + 38, 316, 2.5, 0, Math.PI * 2); ctx.fillStyle = BAYC; ctx.fill();   // drain plug
+    wpart(poly(E.block), cx - 62, 124, 1.6);
+    ctx.lineWidth = 1; ctx.strokeStyle = btint(0.3);
+    ctx.beginPath(); for (const y of [222, 246, 270]) { ctx.moveTo(cx - 58, y); ctx.lineTo(cx - 52, y); ctx.moveTo(cx + 52, y); ctx.lineTo(cx + 58, y); } ctx.stroke();   // block ribs
+    wpart(rr(E.head.x, E.head.y, E.head.w, E.head.h, 5), E.head.x, E.head.w, 1.5);
+    ctx.beginPath(); ctx.moveTo(E.head.x + 4, E.head.y + E.head.h); ctx.lineTo(E.head.x + E.head.w - 4, E.head.y + E.head.h); ctx.lineWidth = 2; ctx.strokeStyle = btint(0.5); ctx.stroke();   // head gasket line
+    const C = E.cover;
+    wpart(() => { ctx.beginPath(); ctx.moveTo(C.x, C.y + C.h); ctx.lineTo(C.x + 4, C.y + 12); ctx.quadraticCurveTo(C.x + 8, C.y, C.x + 24, C.y); ctx.lineTo(C.x + C.w - 24, C.y); ctx.quadraticCurveTo(C.x + C.w - 8, C.y, C.x + C.w - 4, C.y + 12); ctx.lineTo(C.x + C.w, C.y + C.h); ctx.closePath(); }, C.x, C.w, 1.4);
+    rrect(cx - 34, C.y - 7, 16, 8, 3); ctx.fillStyle = GLASS; ctx.fill(); ctx.lineWidth = 1.1; ctx.strokeStyle = BAYC; ctx.stroke();   // oil filler cap
+    rrect(cx + 8, C.y - 12, 12, 13, 2); ctx.fillStyle = GLASS; ctx.fill(); ctx.stroke();               // coil pack
+    ctx.beginPath(); ctx.moveTo(cx + 20, C.y - 6); ctx.quadraticCurveTo(cx + 36, C.y - 10, cx + 40, C.y - 2); ctx.lineWidth = 1; ctx.strokeStyle = btint(0.45); ctx.stroke();
+    // thermostat housing + upper radiator hose leaving the head toward the front
+    rrect(cx + 50, 160, 12, 10, 2); ctx.fillStyle = GLASS; ctx.fill(); ctx.lineWidth = 1.1; ctx.strokeStyle = BAYC; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + 62, 164); ctx.quadraticCurveTo(cx + 80, 158, cx + 94, 152); ctx.lineWidth = 6; ctx.strokeStyle = BAYC; ctx.stroke(); ctx.lineWidth = 3.8; ctx.strokeStyle = GLASS; ctx.stroke();
+    // engine mount on top of the timing end
+    wpart(() => { ctx.beginPath(); ctx.moveTo(cx - 40, 150); ctx.lineTo(cx - 34, 124); ctx.lineTo(cx - 6, 124); ctx.lineTo(cx - 2, 150); ctx.closePath(); }, cx - 40, 38, 1.2);
+    ctx.beginPath(); ctx.arc(cx - 20, 132, 5, 0, Math.PI * 2); ctx.fillStyle = GLASS; ctx.fill(); ctx.lineWidth = 1.1; ctx.strokeStyle = BAYC; ctx.stroke();
+    for (const bx of [cx - 32, cx - 8]) { ctx.beginPath(); ctx.arc(bx, 144, 1.5, 0, Math.PI * 2); ctx.fillStyle = BAYC; ctx.fill(); }
+    // timing-belt cover with the two cam-sprocket bulges
+    wpart(timingPath, cx - 50, 100, 1.3, 0.8);
+    ctx.lineWidth = 1; ctx.strokeStyle = btint(0.3);
+    for (const sx of [cx - 22, cx + 22]) { ctx.beginPath(); ctx.arc(sx, 170, 17, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(cx - 42, 200); ctx.lineTo(cx + 42, 200); ctx.stroke();                     // upper/lower cover split
+    text("DOHC 16V", cx, 194, 6.5, btint(0.55), { align: "center", base: "middle", ls: 1.5 });
+    // tensioner arm
+    const T = E.pul.idler;
+    ctx.beginPath(); ctx.moveTo(T.x, T.y); ctx.lineTo(T.x - 14, T.y + 18); ctx.lineWidth = 5; ctx.strokeStyle = BAYC; ctx.stroke(); ctx.lineWidth = 3; ctx.strokeStyle = GLASS; ctx.stroke();
+    ctx.beginPath(); ctx.arc(T.x - 14, T.y + 18, 3, 0, Math.PI * 2); ctx.fillStyle = BAYC; ctx.fill();
+    // accessory bodies behind their pulleys
+    const A = E.pul.alt, P = E.pul.ps, AC = E.pul.ac;
+    ctx.beginPath(); ctx.arc(A.x, A.y, A.r + 7, 0, Math.PI * 2); ctx.fillStyle = "#0a0d11"; ctx.fill(); ctx.fillStyle = btint(0.12); ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = BAYC; ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = btint(0.35);
+    ctx.beginPath(); for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6; ctx.moveTo(A.x + Math.cos(a) * (A.r + 2), A.y + Math.sin(a) * (A.r + 2)); ctx.lineTo(A.x + Math.cos(a) * (A.r + 6), A.y + Math.sin(a) * (A.r + 6)); } ctx.stroke();   // cooling vents
+    ctx.beginPath(); ctx.arc(P.x - 3, P.y + 4, P.r + 5, 0, Math.PI * 2); ctx.fillStyle = "#0a0d11"; ctx.fill(); ctx.fillStyle = btint(0.12); ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = BAYC; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(P.x - 10, P.y - 12); ctx.quadraticCurveTo(P.x - 22, P.y - 30, P.x - 14, P.y - 44); ctx.lineWidth = 2.4; ctx.strokeStyle = btint(0.5); ctx.stroke();   // P/S line
+    rrect(AC.x - AC.r - 4, AC.y - AC.r - 2, (AC.r + 4) * 2, (AC.r + 2) * 2 + 4, 6); ctx.fillStyle = "#0a0d11"; ctx.fill(); ctx.fillStyle = btint(0.12); ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = BAYC; ctx.stroke();
+    // serpentine belt
+    ctx.lineWidth = 3; ctx.strokeStyle = "#0d1115";
+    ctx.beginPath(); for (const s of BELT.seg) { ctx.moveTo(s.p1[0], s.p1[1]); ctx.lineTo(s.p2[0], s.p2[1]); } ctx.stroke();
+    for (const w of BELT.wraps) { ctx.beginPath(); ctx.arc(w.p.x, w.p.y, w.p.r, w.from, w.to, false); ctx.stroke(); }
+    ctx.lineWidth = 1; ctx.strokeStyle = btint(0.7);
+    ctx.beginPath(); for (const s of BELT.seg) { ctx.moveTo(s.p1[0], s.p1[1]); ctx.lineTo(s.p2[0], s.p2[1]); } ctx.stroke();
+    for (const w of BELT.wraps) { ctx.beginPath(); ctx.arc(w.p.x, w.p.y, w.p.r + 1.5, w.from, w.to, false); ctx.stroke(); }
+    // labels
+    const lab = (s, x, y, al) => text(s, x, y, 7, "#7d6a60", { align: al, base: "middle", ls: 1.5 });
+    const L = 516, R = 752;
+    lab("IAT", L, 184, "right"); lab("LOAD", R, 214, "left"); lab("ADV", R, 250, "left");
+    text("ALT", A.x, A.y - A.r - 12, 6.5, btint(0.65), { align: "center", base: "middle", ls: 1 });
+    text("P/S", P.x - 4, P.y + P.r + 14, 6.5, btint(0.65), { align: "center", base: "middle", ls: 1 });
+    text("A/C", AC.x, AC.y + AC.r + 11, 6.5, btint(0.65), { align: "center", base: "middle", ls: 1 });
+    ctx.lineCap = "butt";
+    ctx.restore();
+  }
+
+  // ---- live ----
+  let engHeat = 0;
+  function bayUpdate(dt) {
+    const k = Math.max(0, Math.min(1, (S.rpm - CFG.idle) / (REDLINE - CFG.idle)));
+    engHeat += (k - engHeat) * Math.min(1, dt / 1.5);         // the engine heats and cools slowly
+  }
+  function drawBayLive() {
+    const E = ENG, now = performance.now() / 1000;
+    ctx.save(); ctx.translate(E.cx, E.pose.y); ctx.scale(E.pose.s, E.pose.s); ctx.translate(-E.cx, -230);
+    const h = smooth(engHeat), hot = mixHex(BAYC, "#ff1f2a", h);
+    // engine heat: head, block and cover warm toward red; outline glows when hot
+    if (h > 0.01) {
+      ctx.fillStyle = rgba(hot, 0.32 * h);
+      rrect(E.head.x, E.head.y, E.head.w, E.head.h, 5); ctx.fill();
+      poly(E.block)(); ctx.fill();
+      timingPath(); ctx.fill();
+      poly(E.block)(); glowStroke(rgba(hot, 0.9 * h), 1.6, 7);
+      timingPath(); glowStroke(rgba(hot, 0.9 * h), 1.4, 6);
+    }
+    // pulleys: each turns at crank speed × crank/pulley diameter ratio, like the real belt drive
+    const pulley = (p, col, spokes, ring) => {
+      const ang = crank * E.pul.crank.r / p.r;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fillStyle = GLASS; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke();
+      if (ring) { ctx.beginPath(); ctx.arc(p.x, p.y, p.r - 4, 0, Math.PI * 2); ctx.lineWidth = 1; ctx.stroke(); }
+      ctx.beginPath();
+      for (let k = 0; k < spokes; k++) { const a = ang + k * 2 * Math.PI / spokes; ctx.moveTo(p.x + Math.cos(a) * 2.5, p.y + Math.sin(a) * 2.5); ctx.lineTo(p.x + Math.cos(a) * (p.r - (ring ? 5 : 2)), p.y + Math.sin(a) * (p.r - (ring ? 5 : 2))); }
+      ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+    };
+    pulley(E.pul.crank, BAYC, 6, true);                       // harmonic balancer ring
+    pulley(E.pul.ac, BAYC, 3, true);
+    pulley(E.pul.ps, BAYC, 4, false);
+    pulley(E.pul.idler, BAYC, 3, false);
+    pulley(E.pul.alt, mixHex(BAYC, "#5ee08a", smooth(chargeK)), 5, false);
+    // readouts
+    const L = 516, R = 752, v = (s, x, y, al, col) => text(s, x, y, 12, col || "#f2f4f7", { align: al, base: "middle", weight: 500 });
+    v(Math.round(S.intakeTemp) + "°C", L, 198, "right");
+    v(Math.round(S.engineLoad) + "%", R, 228, "left");
+    v(S.timing.toFixed(0) + "°", R, 264, "left");
+    // shift flash
+    if (shiftFlash && now - shiftFlash.t < 0.9) {
+      const a = 1 - (now - shiftFlash.t) / 0.9, x = R + 10, y = 300;
+      ctx.save(); ctx.globalAlpha *= a; ctx.beginPath();
+      if (shiftFlash.up) { ctx.moveTo(x, y - 7); ctx.lineTo(x + 7, y + 5); ctx.lineTo(x - 7, y + 5); }
+      else { ctx.moveTo(x, y + 7); ctx.lineTo(x + 7, y - 5); ctx.lineTo(x - 7, y - 5); }
+      ctx.closePath(); ctx.fillStyle = shiftFlash.up ? "#ffffff" : "#ffb020"; ctx.fill();
+      text("SHIFT", x, y + 15, 7, "#c9b2a6", { align: "center", base: "middle", ls: 1 }); ctx.restore();
+    }
+  ctx.restore();
+  }
+
+  // Normal: the road scene in the right panel, with charging and engine-temp lines under the title
+  function drawNormalVehicle() {
+    const t = S.coolant;
+    const cold = Math.max(0, Math.min(1, (OP_TEMP - t) / 40)), hot = Math.max(0, Math.min(1, (t - HOT_TEMP) / 8));
+    const pulse = hot > 0 ? 0.7 + 0.3 * Math.sin(performance.now() / 1000 * 6) : 1;
+    drawRoadLive(NROAD, "normal", hot > 0 ? hot * pulse : -cold);
+    drawChargeRow(NROAD.cx, 84);
+    const msg = cold > 0 ? ["WARMING UP", "#6fa8ff"] : hot > 0 ? ["ENGINE HOT", "#ff2d3f"] : null;
+    if (msg) text(msg[0], NROAD.cx, 102, 9, msg[1], { align: "center", base: "middle", ls: 2 });
+  }
+
+  function placed(which) {
+    const a = INTRO[which], f = FINAL[which], e = ECO_POSE[which], k = ecoA;
+    const b = { x: lerp(f.x, e.x, k), y: lerp(f.y, e.y, k), s: lerp(f.s, e.s, k) };
+    return { x: lerp(a.x, b.x, A.move), y: lerp(a.y, b.y, A.move), s: lerp(a.s, b.s, A.move) };
+  }
+  function withAlpha(alpha, fn) {
+    if (alpha <= 0.001) return;
+    ctx.save(); ctx.globalAlpha *= alpha; fn(); ctx.restore();     // multiplies, so nested fades combine
+  }
+  function atPose(p, ox, oy, fn) {
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.scale(p.s, p.s); ctx.translate(-ox, -oy);
+    fn();
+    ctx.restore();
+  }
+
+  // Everything that never moves (background, texture, panels, band, accent lines,
+  // trip card shape) is drawn once per drive mode into an image and reused.
+  // On the Rock64 these become plain pre-rendered images in Qt.
+  let chromeMode = "normal", chromePass = false, curScale = 1, chromeScale = 0;
+  const chromeCache = {};
+  function drawBackground() {
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#05070a"); bg.addColorStop(1, "#010203");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.beginPath(); ctx.rect(0, 0, W, H); texture(0.035);
+  }
+  function drawChrome() {
+    drawFloor();
+    ctx.save(); enterGroup();
+    if (chromeMode === "sport") { drawSportStatic(); ctx.restore(); return; }
+    sidePanelPath(false); fillPanel(null, PT, PB);
+    sidePanelPath(true);  fillPanel(null, PT, PB);
+    const accentArc = (a0, a1, ccw) => {
+      ctx.beginPath(); ctx.arc(DCX, DCY, WRAP + 0.5, a0, a1, ccw); glowStroke(rgba(TH.accent, 0.85), 2, 8);
+    };
+    const aBotL = Math.atan2(PB - DCY, -wrapX(PB));
+    accentArc(aBotL, aBotL + 0.42, false);
+    accentArc(Math.PI - aBotL, Math.PI - aBotL - 0.42, true);
+    ctx.beginPath(); ctx.moveTo(250, PT); ctx.lineTo(150, PT); glowStroke(rgba(TH.accent, 0.8), 2, 6);
+    ctx.beginPath(); ctx.moveTo(W - 250, PT); ctx.lineTo(W - 150, PT); glowStroke(rgba(TH.accent, 0.8), 2, 6);
+    if (chromeMode === "normal") drawRoadStatic(NROAD);
+    drawTrips();
+    ctx.restore();
+  }
+  // Paint the static layers into any 2D context (the web caches below, or a Qt Canvas layer).
+  // clip (optional) = [x, y, w, h]: only that part is needed, so skip the rest.
+  function paintBackgroundTo(c) {
+    const main = ctx; ctx = c;
+    texPattern = null; drawBackground(); texPattern = null; ctx = main;
+  }
+  function paintChromeTo(c, mode, clip) {
+    const main = ctx, saved = Object.assign({}, TH);
+    ctx = c;
+    if (clip) { ctx.save(); ctx.beginPath(); ctx.rect(clip[0], clip[1], clip[2], clip[3]); ctx.clip(); }
+    Object.assign(TH, THEMES[mode]); chromePass = true; chromeMode = mode; texPattern = null;
+    drawChrome();
+    chromePass = false; texPattern = null;
+    if (clip) ctx.restore();
+    ctx = main; Object.assign(TH, saved);
+  }
+  let bgCache = null, bgScale = 0;
+  function backgroundLayer() {
+    if (!bgCache || bgScale !== curScale) {
+      const c = document.createElement("canvas");
+      c.width = Math.round(W * curScale); c.height = Math.round(H * curScale);
+      const x = c.getContext("2d"); x.setTransform(curScale, 0, 0, curScale, 0, 0);
+      paintBackgroundTo(x);
+      bgCache = c; bgScale = curScale;
+    }
+    return bgCache;
+  }
+  function chromeFor(mode) {
+    if (chromeScale !== curScale) { for (const k in chromeCache) delete chromeCache[k]; chromeScale = curScale; }
+    if (!chromeCache[mode]) {
+      const c = document.createElement("canvas");
+      c.width = Math.round(W * curScale); c.height = Math.round(H * curScale);
+      const x = c.getContext("2d"); x.setTransform(curScale, 0, 0, curScale, 0, 0);
+      paintChromeTo(x, mode);
+      chromeCache[mode] = c;
+    }
+    return chromeCache[mode];
+  }
+
+  // ================= Bottom strip: wire floor + warning lamps =================
+  // A perspective grid floor across the bottom (cached in each mode's chrome), and the
+  // warning lamps the car can actually give over OBD2, standing on it.
+  const FLOOR = { top: 438, bottom: 480, vpY: 415, step: 64, rows: 5 };
+  function drawFloor() {
+    const F = FLOOR, cx = W / 2, uN = F.bottom - F.vpY, uF = F.top - F.vpY;
+    const base = ctx.createLinearGradient(0, F.top, 0, F.bottom);
+    base.addColorStop(0, rgba(TH.accent, 0)); base.addColorStop(1, rgba(TH.accent, 0.08));
+    ctx.fillStyle = base; ctx.fillRect(0, F.top, W, F.bottom - F.top);
+    const sideFade = a => {
+      const g = ctx.createLinearGradient(0, 0, W, 0);
+      g.addColorStop(0, rgba(TH.accent, 0)); g.addColorStop(0.18, rgba(TH.accent, a));
+      g.addColorStop(0.82, rgba(TH.accent, a)); g.addColorStop(1, rgba(TH.accent, 0));
+      return g;
+    };
+    ctx.save(); ctx.beginPath(); ctx.rect(0, F.top, W, F.bottom - F.top); ctx.clip();
+    ctx.lineWidth = 1;
+    // cross lines, evenly spaced in depth (1/distance) so they bunch up toward the far edge
+    for (let i = 1; i <= F.rows; i++) {
+      const t = i / F.rows, y = F.vpY + 1 / lerp(1 / uF, 1 / uN, t);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.strokeStyle = sideFade(0.08 + 0.26 * t); ctx.stroke();
+    }
+    // lines running away from the viewer toward a vanishing point just above the far edge
+    const vg = ctx.createLinearGradient(0, F.top, 0, F.bottom);
+    vg.addColorStop(0, rgba(TH.accent, 0.05)); vg.addColorStop(1, rgba(TH.accent, 0.42));
+    const n = Math.ceil(cx / F.step) + 6;
+    for (let k = -n; k <= n; k++) {
+      const xb = cx + k * F.step, xt = cx + (xb - cx) * uF / uN;
+      const edge = Math.max(0, 1 - Math.abs(xb - cx) / (cx * 1.3));
+      if (edge <= 0) continue;
+      ctx.globalAlpha = edge;
+      ctx.beginPath(); ctx.moveTo(xt, F.top); ctx.lineTo(xb, F.bottom); ctx.strokeStyle = vg; ctx.stroke();
+    }
+    ctx.restore();
+    // far edge: a glowing line like the accent lines up top, fading out at the ends
+    const hg = ctx.createLinearGradient(0, 0, W, 0);
+    hg.addColorStop(0, rgba(TH.accent, 0)); hg.addColorStop(0.2, rgba(TH.accent, 0.75));
+    hg.addColorStop(0.8, rgba(TH.accent, 0.75)); hg.addColorStop(1, rgba(TH.accent, 0));
+    ctx.beginPath(); ctx.moveTo(20, F.top); ctx.lineTo(W - 20, F.top); glowStroke(hg, 1.5, 6);
+  }
+
+  // Lamp icons, drawn once per colour into small images (plain QImages in Qt)
+  const LAMP_OFF = "#28313a", LAMP_BASE = 467, LAMP_SIZE = 22;
+  const iconCache = {};
+  function drawGlyph(g, col) {
+    const c = ctx;
+    c.lineJoin = "round"; c.lineCap = "round"; c.lineWidth = 1.8; c.strokeStyle = col; c.fillStyle = rgba(col, 0.18);
+    const P = pts => { c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); };
+    if (g === "engine") {
+      P([[2.5, 11], [5, 11], [5, 8], [8, 8], [8, 6], [14, 6], [14, 8], [17, 8], [19, 10], [21, 10], [21, 8], [22.5, 8], [22.5, 17], [21, 17], [21, 15], [19, 15], [17, 18.5], [8, 18.5], [6, 16], [5, 16], [5, 14], [2.5, 14]]);
+      c.closePath(); c.fill(); c.stroke();
+      P([[8.5, 3.5], [13.5, 3.5]]); c.stroke(); P([[11, 3.5], [11, 6]]); c.stroke();
+    } else if (g === "battery") {
+      rrect(3, 7, 18, 12.5, 1.5); c.fill(); c.stroke();
+      c.fillStyle = col; c.fillRect(5.5, 4.5, 3.5, 2.5); c.fillRect(15, 4.5, 3.5, 2.5);
+      P([[5.8, 13], [9.2, 13]]); c.stroke(); P([[14.8, 13], [18.2, 13]]); c.stroke(); P([[16.5, 11.3], [16.5, 14.7]]); c.stroke();
+    } else if (g === "temp") {
+      rrect(10.3, 2.5, 3.4, 12.5, 1.7); c.fill(); c.stroke();
+      c.beginPath(); c.arc(12, 16.8, 3, 0, Math.PI * 2); c.fillStyle = col; c.fill();
+      for (const y of [5.5, 8.5, 11.5]) { P([[14.5, y], [17, y]]); c.stroke(); }
+      c.lineWidth = 1.5; c.beginPath(); c.moveTo(2.5, 21.5);
+      for (let x = 2.5; x < 21; x += 4.5) { c.quadraticCurveTo(x + 1.1, 20, x + 2.25, 21.5); c.quadraticCurveTo(x + 3.4, 23, x + 4.5, 21.5); }
+      c.stroke();
+    } else if (g === "fuel") {
+      rrect(4, 4, 10, 17, 1.5); c.fill(); c.stroke();
+      c.fillStyle = col; c.fillRect(6.2, 6.2, 5.6, 4.6);
+      P([[2.5, 21], [15.5, 21]]); c.stroke();
+      c.beginPath(); c.moveTo(14, 9.5); c.lineTo(17, 9.5); c.lineTo(17, 16); c.quadraticCurveTo(17, 18, 18.6, 18); c.quadraticCurveTo(20.2, 18, 20.2, 16);
+      c.lineTo(20.2, 8); c.lineTo(18, 5.5); c.stroke();
+    } else if (g === "ice") {
+      for (let k = 0; k < 6; k++) {
+        const a = k * Math.PI / 3 - Math.PI / 2, ex = 12 + Math.cos(a) * 9.5, ey = 12 + Math.sin(a) * 9.5;
+        P([[12, 12], [ex, ey]]); c.stroke();
+        const mx = 12 + Math.cos(a) * 6, my = 12 + Math.sin(a) * 6;
+        for (const s of [-1, 1]) { const b = a + s * 0.75; P([[mx, my], [mx + Math.cos(b) * 3, my + Math.sin(b) * 3]]); c.stroke(); }
+      }
+    } else if (g === "link") {
+      P([[3.5, 6], [20.5, 6], [18.5, 14.5], [5.5, 14.5]]); c.closePath(); c.fill(); c.stroke();
+      c.fillStyle = col;
+      for (let x = 7; x <= 17.1; x += 2.5) { c.fillRect(x - 0.6, 8.6, 1.2, 1.2); }
+      for (let x = 8.25; x <= 15.9; x += 2.5) { c.fillRect(x - 0.6, 11.3, 1.2, 1.2); }
+      c.beginPath(); c.moveTo(12, 14.5); c.lineTo(12, 18); c.quadraticCurveTo(12, 21, 15, 21); c.lineTo(20.5, 21); c.stroke();
+    }
+  }
+  function iconImg(g, col) {
+    const key = g + col + curScale;
+    if (!iconCache[key]) {
+      const px = Math.ceil(LAMP_SIZE * curScale), cv2 = document.createElement("canvas");
+      cv2.width = cv2.height = px;
+      const main = ctx; ctx = cv2.getContext("2d"); ctx.scale(px / 24, px / 24);
+      drawGlyph(g, col); ctx = main;
+      iconCache[key] = cv2;
+    }
+    return iconCache[key];
+  }
+  // The lamps the car can give over OBD2 (everything else on the stock cluster is not on the diagnostic bus)
+  const LAMPS = [
+    { id: "cel",  x: 66,      g: "engine",  col: () => "#ffb020",                                   // PID 01 MIL; also lit with the key on until the engine runs
+      on: () => S.checkEngine || ENGINE.state !== "running" },
+    { id: "batt", x: 114,     g: "battery", col: () => "#ff3b4e",                                   // engine not running, or low volts while running
+      on: () => ENGINE.state !== "running" || ENGINE.lowVoltT > 5 },
+    { id: "temp", x: 162,     g: "temp",    col: () => S.coolant > HOT_TEMP ? "#ff3b4e" : "#4aa3ff", // blue while cold, red when overheating (PID 05)
+      on: () => S.coolant > HOT_TEMP || S.coolant < CFG.coldLampOff },
+    { id: "fuel", x: W - 162, g: "fuel",    col: () => "#ffb020", on: () => S.fuel < CFG.lowFuel },  // calculated tank level
+    { id: "ice",  x: W - 114, g: "ice",     col: () => "#9cd2ff", on: () => S.outsideTemp <= CFG.iceTemp },   // PID 46 ambient
+    { id: "link", x: W - 66,  g: "link",    col: () => "#ffb020", on: () => !S.obdLink }            // adapter stopped answering
+  ];
+  function drawLamps(bulb) {
+    for (const L of LAMPS) {
+      const on = bulb || L.on(), col = on ? L.col() : LAMP_OFF, img = iconImg(L.g, col);
+      const s = LAMP_SIZE, x = L.x - s / 2;
+      if (on) {                                                  // pool of light on the floor under a lit lamp
+        ctx.beginPath(); ctx.ellipse(L.x, LAMP_BASE + 2, 20, 4.5, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(col, 0.14); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(L.x, LAMP_BASE + 1.5, 11, 2.4, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(col, 0.3); ctx.fill();
+      }
+      ctx.drawImage(img, x, LAMP_BASE - s, s, s);
+      ctx.save(); ctx.globalAlpha *= on ? 0.3 : 0.14;           // squashed reflection on the floor
+      ctx.translate(0, LAMP_BASE + 1); ctx.scale(1, -0.35); ctx.drawImage(img, x, -s, s, s);
+      ctx.restore();
+    }
+  }
+
+  // ================= Engine state (key on vs running) =================
+  // Worked out from rpm alone, so it behaves the same with the real OBD2 feed:
+  // ECU answering + rpm under offRpm = key on, engine off; offRpm..runRpm = cranking; above = running.
+  const ENGINE = { state: "off", since: 0, runFx: 9, lowVoltT: 0 };
+  function updateEngine(dt, rpm) {
+    const prev = ENGINE.state;
+    let st;
+    if (rpm < CFG.offRpm) st = "off";
+    else if (rpm < CFG.runRpm) st = prev === "running" ? "running" : "cranking";   // a dip while running isn't a crank
+    else st = "running";
+    if (st !== prev) { ENGINE.state = st; ENGINE.since = 0; if (st === "running") ENGINE.runFx = 0; }
+    ENGINE.since += dt; ENGINE.runFx += dt;
+    ENGINE.lowVoltT = st === "running" && S.batteryVolts < CFG.lowVolts ? ENGINE.lowVoltT + dt : 0;
+  }
+
+  // ---- Sport switch helpers (screen space) ----
+  const SW_CUT = FLOOR.top - 6;                                 // floor below this line just cross-fades
+  // Sport chrome is cut into left bracket | engine | right bracket. Above SW_TOP the brackets' top ends
+  // reach toward the centre, so up there the split is simply at the middle of the screen.
+  const SW_L = 440, SW_R = 840, SW_TOP = 118;   // engine labels (IAT, LOAD, ADV) fall inside the middle part
+  const toScreenY = y => G_TOP + (y - G_SRC_TOP) * GS;
+  const clipRects = (...r) => () => { ctx.beginPath(); for (const q of r) ctx.rect(q[0], q[1], q[2], q[3]); };
+  function blit(img, x, y, w, h, tf, alpha, clip) {
+    if (alpha <= 0.002) return;
+    ctx.save(); if (clip) clip(); else { ctx.beginPath(); ctx.rect(x, y, w, h); } ctx.clip();
+    ctx.globalAlpha *= alpha; if (tf) tf(); ctx.drawImage(img, 0, 0, W, H); ctx.restore();
+  }
+  const zoomAbout = (cx, cy, z) => () => { ctx.translate(cx, cy); ctx.scale(z, z); ctx.translate(-cx, -cy); };
+  function drawSportSwitchChrome(k) {
+    const other = chromeFor(MODE.to === "sport" ? MODE.from : MODE.to), sp = chromeFor("sport");
+    const from = chromeFor(MODE.from), to = chromeFor(MODE.to);
+    // floor strip: plain cross-fade so the ground never dims
+    blit(from, 0, SW_CUT, W, H - SW_CUT, null, 1); blit(to, 0, SW_CUT, W, H - SW_CUT, null, k);
+    // Normal / Eco: whole layout, slightly zoomed while leaving or arriving
+    blit(other, 0, 0, W, SW_CUT, zoomAbout(W / 2, toScreenY(220), SPX.zoom), SPX.other);
+    // Sport: brackets slide in/out at the sides, the engine scales in the middle
+    const off = SPX.off * GS;
+    blit(sp, 0, 0, 0, 0, () => ctx.translate(-off, 0), SPX.sport, clipRects([0, 0, W / 2, SW_TOP], [0, SW_TOP, SW_L, SW_CUT - SW_TOP]));
+    blit(sp, 0, 0, 0, 0, () => ctx.translate(off, 0), SPX.sport, clipRects([W / 2, 0, W / 2, SW_TOP], [SW_R, SW_TOP, W - SW_R, SW_CUT - SW_TOP]));
+    blit(sp, 0, 0, 0, 0, zoomAbout(W / 2, toScreenY(ENG.pose.y), SPX.eng), SPX.sport, clipRects([SW_L, SW_TOP, SW_R - SW_L, SW_CUT - SW_TOP]));
+  }
+  // Qt build: the chrome is shown as clipped pieces of each mode's static layer, each with its own
+  // opacity/transform per frame, matching the web blits above exactly.
+  const CHROME_PIECES = {
+    plain: [["upper", 0, 0, W, SW_CUT], ["floor", 0, SW_CUT, W, H - SW_CUT]],
+    sport: [["floor", 0, SW_CUT, W, H - SW_CUT], ["L1", 0, 0, W / 2, SW_TOP], ["L2", 0, SW_TOP, SW_L, SW_CUT - SW_TOP],
+            ["R1", W / 2, 0, W / 2, SW_TOP], ["R2", SW_R, SW_TOP, W - SW_R, SW_CUT - SW_TOP], ["M", SW_L, SW_TOP, SW_R - SW_L, SW_CUT - SW_TOP]]
+  };
+  function chromePieces() {
+    const out = [];
+    for (const mode of ["eco", "normal", "sport"])
+      for (const p of CHROME_PIECES[mode === "sport" ? "sport" : "plain"]) out.push({ mode, piece: p[0], x: p[1], y: p[2], w: p[3], h: p[4] });
+    return out;
+  }
+  function pieceState(mode, piece) {
+    const k = smooth(modeK), changing = k < 1 && MODE.from !== MODE.to;
+    const st = { opacity: 0, tx: 0, s: 1, ox: W / 2, oy: H / 2, z: MODE.to === mode ? 2 : 1 };
+    if (mode !== MODE.from && mode !== MODE.to) return st;
+    if (!SPX.active) { st.opacity = A.dash * (mode === MODE.to ? (changing ? k : 1) : (changing ? 1 : 0)); return st; }
+    if (piece === "floor") { st.opacity = A.dash * (mode === MODE.to ? k : 1); return st; }
+    if (mode !== "sport") { st.opacity = A.dash * SPX.other; st.s = SPX.zoom; st.oy = toScreenY(220); return st; }
+    st.opacity = A.dash * SPX.sport;
+    if (piece[0] === "L") st.tx = -SPX.off * GS;
+    else if (piece[0] === "R") st.tx = SPX.off * GS;
+    else { st.s = SPX.eng; st.oy = toScreenY(ENG.pose.y); }
+    return st;
+  }
+  // content-space versions for the live layers (already inside enterGroup)
+  function withTf(alpha, tf, fn) { if (alpha <= 0.002) return; ctx.save(); ctx.globalAlpha *= alpha; tf(); fn(); ctx.restore(); }
+  const otherTf = () => zoomAbout(W / 2, 220, SPX.zoom)();
+
+  // Sport at redline: the top half of the background pulses red, fading out towards the middle
+  function washAlpha() {
+    if (!(sportA > 0.01 && redK > 0.001)) return 0;
+    const pulse = 0.7 + 0.3 * Math.sin(performance.now() / 1000 * 26);
+    return 0.26 * sportA * smooth(redK) * pulse * A.dash;
+  }
+  // Qt build: these three layers are separate GPU items (see qt/main.qml); draw() then only paints the live parts.
+  let LAYERED = false;
+  function draw() {
+    const lamp = A.lamps;
+    ctx.globalAlpha = 1;
+    if (LAYERED) ctx.clearRect(0, 0, W, H);
+    else { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H); }
+
+    // ---------- dash: background, Sport redline wash, then the UI layer ----------
+    if (!LAYERED) withAlpha(A.dash, () => ctx.drawImage(backgroundLayer(), 0, 0, W, H));
+    const wa = LAYERED ? 0 : washAlpha();
+    if (wa > 0) {
+      const g = ctx.createLinearGradient(0, 0, 0, H / 2);
+      g.addColorStop(0, `rgba(255,30,50,${wa})`); g.addColorStop(1, "rgba(255,30,50,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H / 2);
+    }
+    if (!LAYERED) withAlpha(A.dash, () => {
+      const k = smooth(modeK);
+      if (SPX.active) drawSportSwitchChrome(k);
+      else {
+        if (k < 1 && MODE.from !== MODE.to) ctx.drawImage(chromeFor(MODE.from), 0, 0, W, H);
+        ctx.globalAlpha *= (k < 1 && MODE.from !== MODE.to) ? k : 1;
+        ctx.drawImage(chromeFor(MODE.to), 0, 0, W, H);
+      }
+    });
+
+    ctx.save(); enterGroup();
+    // ---------- speedometer (under the tach, or on top of it once Eco is past halfway) ----------
+    const notSport = SPX.other, sportIn = SPX.sport;
+    const speedo = () => withTf(A.gauges * notSport, otherTf, () => atPose(placed("speed"), SCX, SCY, () => drawSpeedGauge(false)));
+    if (ecoA <= 0.5) speedo();
+
+    // ---------- dash: side content ----------
+    withTf(A.dash * notSport, otherTf, () => {
+      // ---------- LEFT: trip section ----------
+      // Everything here is counted on the device from speed and time.
+      drawTrips();
+      if (ecoA > 0.01) withAlpha(ecoA, drawEconomy);
+
+      const normalA = Math.max(0, 1 - ecoA - (SPX.active ? 0 : sportA));   // during a Sport switch the whole layer fades as one
+      text("VEHICLE STATUS", lerp(NROAD.cx, CAR.x, ecoA), 62, 11, "#7d8996", { ls: 3, align: "center" });
+      if (ecoA > 0.01) withAlpha(ecoA, drawCarStatus);
+      if (normalA > 0.01) withAlpha(normalA, drawNormalVehicle);
+
+      // rings: sweep to full, then settle on the real value
+      const ring = (min, max, real) => A.miniDown > 0 ? lerp(max, real, A.miniDown) : lerp(min, max, A.miniUp);
+      const E = ecoA;                                   // Normal: rings in a column; Eco: chevron round the car
+      miniGauge({ cx: 1158, cy: lerp(100, 116, E), r: 46, min: COOLANT_MIN, max: COOLANT_MAX, value: ring(COOLANT_MIN, COOLANT_MAX, S.coolant),
+                  label: "COOLANT", unit: "°C", digits: 0, warnFrom: HOT_TEMP, warnTo: COOLANT_MAX, warnColor: RED });
+      const fx = lerp(1158, 1050, E), fy = lerp(222, 228, E);
+      miniGauge({ cx: fx, cy: fy, r: 46, min: 0, max: 1, value: ring(0, 1, S.fuel),
+                  label: "FUEL EST", unit: "%", digits: 0, warnFrom: 0, warnTo: 0.12, warnColor: "#ffb020", _pct: true });
+      text(Math.round(S.range) + " km range", fx, fy + 61, 9, "#7d8996", { align: "center", base: "middle", ls: 1 });
+      miniGauge({ cx: 1158, cy: lerp(344, 340, E), r: 46, min: -30, max: 60, value: ring(-30, 60, S.intakeTemp),
+                  label: "INTAKE", unit: "°C", digits: 0, tint: "#9cc6ff" });
+    });
+
+    // ---------- tachometer (fades out in Eco) ----------
+    withTf(A.gauges * (1 - ecoA) * notSport, otherTf, () => atPose(placed("tach"), DCX, DCY, () => drawDial(false)));
+
+    // ---------- Sport layout (live parts) ----------
+    if (sportIn > 0.002) {
+      const a = A.dash * sportIn;
+      withTf(a, () => ctx.translate(-SPX.off, 0), drawSportLeft);
+      withTf(a, () => ctx.translate(SPX.off, 0), drawSportRight);
+      withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), drawSportMiddle);
+    }
+    if (ecoA > 0.5) speedo();
+
+    // turn signals: tucked into the top of the side panels, or beside the logo in Sport
+    withAlpha(A.dash, () => {
+      const arrow = (tipX, y, dir, on) => {
+        ctx.beginPath(); ctx.moveTo(tipX, y); ctx.lineTo(tipX - dir * 22, y - 13); ctx.lineTo(tipX - dir * 22, y + 13); ctx.closePath();
+        ctx.fillStyle = on ? "#2bdc6b" : "#161c22"; ctx.fill();
+      };
+      const k = sportA, ay = lerp(60, 34, k);
+      arrow(lerp(440, 538, k), ay, -1, S.leftTurn || lamp);
+      arrow(lerp(W - 440, W - 538, k), ay, 1, S.rightTurn || lamp);
+    });
+
+    // mode switch: a ring of light rolls out from the tach
+    if (MT < 1.1 && A.dash > 0.5) {
+      const rp = MT / 1.1, rr = DR + (1 - Math.pow(1 - rp, 3)) * 780;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.5 * Math.pow(1 - rp, 1.5);
+      ctx.beginPath(); ctx.arc(DCX, DCY, rr, 0, Math.PI * 2);
+      glowStroke(TH.accent, 3, 18);
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // ---------- bottom strip ----------
+    withAlpha(A.dash, () => {
+
+      const by = BT + 5;
+      drawLamps(lamp);
+      // engine just started: a light runs out along the far edge of the floor from the centre
+      if (ENGINE.runFx < 1.4) {
+        const p = ENGINE.runFx / 1.4, e = easeOut(p);
+        for (const sd of [-1, 1]) {
+          const x = W / 2 + sd * e * (W / 2 - 60);
+          ctx.beginPath(); ctx.moveTo(x - sd * 60, FLOOR.top); ctx.lineTo(x, FLOOR.top); glowStroke(rgba(TH.accent, 1 - p), 2, 8);
+        }
+      }
+      // drive mode pill
+      const mLabel = THEMES[MODE.to].label + " MODE", mw = measure(mLabel, 10, 700, 2.5) + 30;
+      const pp = MT < 1.3 ? Math.max(0, Math.min(1, MT / 0.5)) : 1, ps = 1 + 0.2 * Math.pow(1 - pp, 2);
+      ctx.save(); ctx.translate(DCX - 150, by + 9); ctx.scale(ps, ps); ctx.translate(-(DCX - 150), -(by + 9));
+      rrect(DCX - 150 - mw / 2, by, mw, 18, 9);
+      ctx.fillStyle = rgba(TH.accent, 0.12); ctx.fill();
+      ctx.lineWidth = 1.2; ctx.strokeStyle = TH.accent; ctx.stroke();
+      text(mLabel, DCX - 150, by + 9.5, 9, TH.accent, { weight: 700, align: "center", base: "middle", ls: 2.5 });
+      ctx.restore();
+
+      const now = new Date();
+      const clock = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+      text(clock, DCX, BB - 6, 24, "#e8ecf0", { align: "center", base: "alphabetic" });   // big, may rise above the strip
+      text(Math.round(S.outsideTemp) + "°C", DCX + 52, BB - 9, 13, "#9aa6b2", { base: "alphabetic" });
+    });
+
+    drawAlertPopup();
+    drawLogo(A.logo, A.logoScale);
+  }
+  // ================= Start =================
+  // ================= Sounds =================
+  // Two slots, both chosen by you: "start" plays when the car powers on (with the
+  // logo), "alert" plays for every warning. Kept in this browser if small enough.
+  const SND = { start: null, alert: null };
+  function setSound(slot, src, remember) {
+    SND[slot] = new Audio(src);
+    if (remember) { try { localStorage.setItem("clusterSnd_" + slot, src); } catch (e) {} }
+  }
+  try { for (const k of ["start", "alert"]) { const v = localStorage.getItem("clusterSnd_" + k); if (v) setSound(k, v, false); } } catch (e) {}
+  function playSound(slot) {
+    const a = SND[slot]; if (!a) return;
+    try { a.currentTime = 0; const p = a.play(); if (p) p.catch(() => {}); } catch (e) {}
+  }
+
+  // ================= Alerts =================
+  // Listed by priority. Each plays the alert sound once when it starts.
+  const ALERTS = [
+    { id: "hot", color: "#ff2d3f", when: () => S.coolant > HOT_TEMP,
+      text: "Engine overheating",
+      sub: "Coolant is above safe temperature. Pull over when it is safe and let the engine cool before driving on." },
+    { id: "cel", color: "#ffb020", when: () => S.checkEngine,
+      text: "Check engine",
+      sub: "The engine computer reported a fault. The car is usually fine to drive, but have the code read soon." },
+    { id: "batt", color: "#ff3b4e", when: () => ENGINE.lowVoltT > 5,
+      text: "Battery not charging",
+      sub: "Voltage is low with the engine running, so the alternator may not be charging. Turn off what you can and have it checked soon." },
+    { id: "cold", color: "#ffb020", when: () => S.coolant < OP_TEMP && S.rpm > COLD_REV, hold: 2.5,
+      text: "Engine still cold",
+      sub: "It has not reached operating temperature yet. Keep the revs low until the warming up note clears." }
+  ].map(a => Object.assign(a, { active: false, since: 0, seen: 0, lastSound: -99 }));
+  function updateAlerts(now) {
+    for (const a of ALERTS) {
+      if (powered && a.when()) {
+        if (!a.active) {
+          a.active = true; a.since = now;
+          if (now - a.lastSound > 4) { playSound("alert"); a.lastSound = now; }
+        }
+        a.seen = now;
+      } else if (a.active && now - a.seen > (a.hold || 0)) a.active = false;
+    }
+    // the warning popup shows for ALERT_SECS after an alert starts, highest priority first
+    return ALERTS.find(a => a.active && now - a.since < ALERT_SECS) || null;
+  }
+  const ALERT_SECS = CFG.alertSeconds;
+  let currentAlert = null;
+
+  // ================= Derived values (calculated on the device) =================
+  // Fuel: MAF (g/s air) / AFR = g/s fuel; / density = L/s. Integrated over time it
+  // drains the tank estimate, which resets to full on "Filled up".
+  let fuelLitres = CFG.tankLitres * VIEW.fuel, fuelSaveT = 0, l100Shown = null;
+  try { const f = parseFloat(localStorage.getItem("clusterFuelL")); if (f >= 0) fuelLitres = f; } catch (e) {}
+  function saveFuel() { try { localStorage.setItem("clusterFuelL", String(fuelLitres)); } catch (e) {} }
+  function fillUp() { fuelLitres = CFG.tankLitres; saveFuel(); updateDerived(0); }
+  function updateDerived(dt) {
+    const lps = (S.maf / (CFG.afr * (S.lambda || 1))) / CFG.fuelDensity;   // litres per second (λ from PID 44)
+    fuelLitres = Math.max(0, fuelLitres - lps * dt);
+    S.tripFuel += lps * dt;
+    S.lph = lps * 3600;
+    const inst = S.speed > 3 ? S.lph / S.speed * 100 : null;     // L/100 km, only meaningful when moving
+    l100Shown = inst === null ? null : (l100Shown === null ? inst : l100Shown + (inst - l100Shown) * Math.min(1, dt * 2));
+    S.l100 = l100Shown;
+    S.avgL100 = S.tripDist > 0.5 ? S.tripFuel / S.tripDist * 100 : null;
+    S.fuel = fuelLitres / CFG.tankLitres;
+    S.range = fuelLitres / (S.avgL100 || CFG.defaultL100) * 100;
+    if ((fuelSaveT += dt) > 10) { fuelSaveT = 0; saveFuel(); }
+  }
+  updateDerived(0);
+
+  // ================= Toy drivetrain for test driving =================
+  const IDLE = CFG.idle;
+  const RATIO = [0, 7.6, 13.2, 19.5, 26.5, 34.0];      // km/h per 1000 rpm, by gear (0 = neutral)
+  const D = { gear: 0, gas: false, rpm: 0, speed: 0, cut: 0, engine: "off", crankT: 0, flare: 0 };
+  // idle sits higher while the engine is cold and flares briefly right after it starts, like the real car
+  const idleRpm = () => IDLE + 300 * Math.max(0, Math.min(1, (OP_TEMP - S.coolant) / 60)) + 550 * D.flare;
+  // toy engine: off -> cranking (~0.9 s at ~230 rpm, volts dip) -> running
+  function engineToy(dt) {
+    if (D.engine === "off") {
+      D.rpm = Math.max(0, D.rpm - 2200 * dt);
+      D.speed = Math.max(0, D.speed - (1.2 + 0.0004 * D.speed * D.speed) * dt);
+      const km = D.speed / 3600 * dt; S.tripA += km; S.tripB += km; S.tripDist += km;
+    } else if (D.engine === "crank") {
+      D.crankT += dt; D.rpm = 230 + 35 * Math.sin(D.crankT * 38);
+      if (D.crankT > 0.9) { D.engine = "run"; D.flare = 1; D.rpm = idleRpm(); }
+    } else {
+      D.flare = Math.max(0, D.flare - dt / 1.4);
+      driveStep(dt);
+    }
+  }
+  const torque = r => Math.max(0.35, Math.min(1, 0.45 + 0.55 * Math.sin(Math.PI * Math.min(1, r / (MAXRPM + 1000)))));
+  // Test scenarios
+  const TEST = { coolantTarget: null };
+  function testStep(dt) {
+    let busy = false;
+    if (TEST.coolantTarget !== null) {
+      const rate = TEST.coolantTarget > S.coolant ? 4 + S.rpm / 1000 : 6;      // warms faster with revs
+      const d = TEST.coolantTarget - S.coolant;
+      S.coolant += Math.sign(d) * Math.min(Math.abs(d), rate * dt);
+      if (Math.abs(d) < 0.05) TEST.coolantTarget = null; else busy = true;
+    }
+    return busy;
+  }
+
+  function driveStep(dt) {
+    const thr = D.gas && D.cut <= 0 ? 1 : 0;
+    D.cut = Math.max(0, D.cut - dt);
+    if (D.gear === 0) {
+      const target = thr ? LIMIT + 500 : idleRpm(), rate = thr ? LIMIT : 2600;
+      D.rpm += Math.max(-rate * dt, Math.min(rate * dt, target - D.rpm));
+      D.speed = Math.max(0, D.speed - (1.2 + 0.0004 * D.speed * D.speed) * dt);
+    } else {
+      const r = RATIO[D.gear], k = RATIO[1] / r;
+      const push = thr * torque(D.rpm) * 17 * k;
+      const drag = 0.6 + 0.00042 * D.speed * D.speed + (thr ? 0 : 2.6 * k);
+      D.speed = Math.max(0, D.speed + (push - drag) * dt);
+      const linked = D.speed / r * 1000;
+      const target = linked < IDLE + 300 ? Math.max(linked, thr ? 2200 : idleRpm()) : linked;   // clutch slips at low speed
+      D.rpm += (target - D.rpm) * Math.min(1, dt * 10);
+    }
+    if (D.rpm >= LIMIT && D.gas) { D.rpm = LIMIT; D.cut = 0.07; }   // rev limiter bounce
+    // trip counters
+    const km = D.speed / 3600 * dt;
+    S.tripA += km; S.tripB += km; S.tripDist += km;
+  }
+  // toy versions of the other sensors, so the derived values behave sensibly
+  function toySensors(dt) {
+    const run = D.engine === "run";
+    if (run) S.tripTime += dt;                                   // ECU: run time since engine start
+    S.maf = D.rpm / 1000 * (D.gas ? 10 : 3.2);                   // ~2.4 g/s at idle, like the real car
+    S.throttle = run ? (D.gas ? 60 : 7) : 0;
+    S.engineLoad = run ? (D.gas ? 70 : 16) : 0;
+    const vTarget = D.engine === "off" ? 12.5 : D.engine === "crank" ? 10.6     // battery at rest / dips while cranking
+                  : 12.6 + 1.6 * Math.max(0, Math.min(1, (S.rpm - 900) / 500));
+    S.batteryVolts += (vTarget - S.batteryVolts) * Math.min(1, dt * 3);
+    S.lambda = D.gas && S.rpm > 3500 ? 0.86 : 1.0;               // engine runs rich under hard load
+    S.timing = run ? (D.gas ? 22 + S.rpm / 800 : 6.5 + S.rpm / 1200) : 0;
+    const catTarget = 360 + S.engineLoad * 4 + S.rpm / 18;       // cats heat up with load and revs
+    S.cat1 += (catTarget - S.cat1) * Math.min(1, dt / 6);
+    S.cat2 += (catTarget - 70 - S.cat2) * Math.min(1, dt / 12);
+  }
+  const gearOut = () => document.getElementById("gearOut");
+  function say(msg) { const m = document.getElementById("driveMsg"); m.textContent = msg; clearTimeout(say.t); say.t = setTimeout(() => m.textContent = "", 1400); }
+  function shift(dir) {
+    if (!powered) return;
+    const g = D.gear + dir;
+    if (g < 0 || g > 5) return;
+    if (g > 0 && D.speed / RATIO[g] * 1000 > LIMIT + 600) { say("Too fast for that gear"); return; }
+    D.gear = g; gearOut().textContent = g === 0 ? "N" : g;
+    kick();
+  }
+  function gas(on) {
+    if (!powered) return;
+    if (on && D.engine !== "run") { say("Start the engine first"); return; }
+    D.gas = on;
+    document.getElementById("gasBtn").classList.toggle("on", on);
+    kick();
+  }
+
+  const engBtn = () => document.getElementById("engBtn");
+  function setEngineBtn() { engBtn().textContent = D.engine === "off" ? "Start engine" : "Stop engine"; }
+  function toggleEngine() {
+    if (!powered) { say("Wait for the key-on check"); return; }
+    if (D.engine === "off") { D.engine = "crank"; D.crankT = 0; }
+    else { D.engine = "off"; D.flare = 0; gas(false); }
+    setEngineBtn(); kick();
+  }
+  let start = null, looping = false, powered = false, lastTs = 0;
+  let redK = 0, logoT = 0, logoMoving = false, perfMs = 0, perfShown = 0;
+  function step(ts) {
+    if (start === null) start = ts;
+    const intro = !powered && animate((ts - start) / 1000);
+    if (!powered && !intro) powered = true;
+    const blending = updateTheme(performance.now() / 1000);   // same clock as MODE.t0
+    const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016; lastTs = ts;
+    let moving = false;
+    if (powered) {
+      engineToy(dt);
+      moving = D.engine === "crank" || D.flare > 0 || D.gas || D.speed > 0.05 || (D.engine === "off" ? D.rpm > 0 : Math.abs(D.rpm - idleRpm()) > 2);
+      if (testStep(dt)) moving = true;
+      S.speed = D.speed; S.realSpeed = D.speed;
+      updateEngine(dt, D.rpm);                                   // in the car: the polled rpm (PID 0C)
+      if (ENGINE.runFx < 1.5 || ENGINE.lowVoltT > 0) moving = true;
+      S.rpm = D.rpm + (MODE.to === "sport" && MT < 0.75 && ENGINE.state === "running" ? 0.5 * REDLINE * Math.sin(Math.PI * MT / 0.75) : 0);
+      toySensors(dt); updateDerived(dt); roadUpdate(dt); traceUpdate(dt);
+    }
+    currentAlert = updateAlerts(ts / 1000);
+    if (currentAlert || ALERTS.some(a => a.active)) moving = true;
+    const flashing = sportA > 0.01 && S.rpm >= REDLINE;
+    looping = intro || blending || flashing || moving || logoMoving || chargeMoving || brakeMoving || (powered && sportA > 0.01);   // Sport: trace keeps scrolling
+    return looping;
+  }
+  function frame(ts) {
+    step(ts);
+    const t0 = performance.now();
+    draw();
+    perfMs = perfMs * 0.9 + (performance.now() - t0) * 0.1;
+    if (ts - perfShown > 500) { perfShown = ts; const el = document.getElementById("perf"); if (el) el.textContent = "Draw time: " + perfMs.toFixed(1) + " ms per frame"; }
+    if (looping) requestAnimationFrame(frame);
+  }
+  function kick() { if (!looping) { looping = true; lastTs = 0; requestAnimationFrame(frame); } }
+  function setMode(m, instant) {
+    MODE.from = instant ? m : MODE.to; MODE.to = m;
+    MODE.dur = (MODE.from === "sport") !== (m === "sport") ? SPORT_SWITCH.dur : 0.6;
+    MODE.t0 = instant ? -1e9 : performance.now() / 1000;
+    document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === m)));
+    kick();
+  }
+  function replay() {
+    playSound("start");
+    setMode("normal", true); start = null; powered = false;
+    Object.assign(D, { gear: 0, gas: false, rpm: 0, speed: 0, cut: 0, engine: "off", crankT: 0, flare: 0 });
+    Object.assign(ENGINE, { state: "off", since: 0, runFx: 9, lowVoltT: 0 });
+    S.tripDist = 0; S.tripTime = 0; gearOut().textContent = "N"; setEngineBtn();
+    kick();
+  }
+  fitCanvas();
+  window.addEventListener("resize", () => { fitCanvas(); draw(); });
+  if (document.fonts) {
+    const faces = Object.values(NUMFONTS).flatMap(f => [f.dial, f.hub].map(w => `${w} 40px ${f.family}`));
+    Promise.all(faces.map(f => document.fonts.load(f).catch(() => {}))).then(draw);
+  }
+  looping = true; requestAnimationFrame(frame);
+  document.getElementById("keyBtn").addEventListener("click", replay);
+  document.getElementById("engBtn").addEventListener("click", toggleEngine);
+  document.getElementById("tIce").addEventListener("click", () => {
+    const on = S.outsideTemp > CFG.iceTemp; S.outsideTemp = on ? -6 : VIEW.outsideTemp; press("tIce", on); draw();
+  });
+  document.getElementById("tLink").addEventListener("click", () => { S.obdLink = !S.obdLink; press("tLink", !S.obdLink); draw(); });
+  document.getElementById("logoIn").addEventListener("change", e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { useLogo(r.result, true); replay(); };
+    r.readAsDataURL(f);
+  });
+  const press = (id, on) => document.getElementById(id).setAttribute("aria-pressed", String(on));
+  document.getElementById("tCold").addEventListener("click", () => {
+    S.coolant = -8; TEST.coolantTarget = OP_TEMP + 1; press("tHot", false); kick();
+  });
+  document.getElementById("tHot").addEventListener("click", () => {
+    const hotTarget = HOT_TEMP + 10;
+    const on = !(TEST.coolantTarget === hotTarget || S.coolant > HOT_TEMP);
+    if (on) S.coolant = Math.max(S.coolant, HOT_TEMP - 3);
+    TEST.coolantTarget = on ? hotTarget : OP_TEMP + 1; press("tHot", on); kick();
+  });
+  document.getElementById("tFill").addEventListener("click", () => { fillUp(); draw(); });
+  document.getElementById("tCel").addEventListener("click", () => {
+    S.checkEngine = !S.checkEngine; press("tCel", S.checkEngine); kick();
+  });
+  for (const [id, slot] of [["sndStartIn", "start"], ["sndAlertIn", "alert"]]) {
+    document.getElementById(id).addEventListener("change", e => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => { setSound(slot, r.result, true); playSound(slot); };
+      r.readAsDataURL(f);
+    });
+  }
+  document.getElementById("logoRedIn").addEventListener("change", e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => useLogo(r.result, true, "red");
+    r.readAsDataURL(f);
+  });
+  document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
+  const gasBtn = document.getElementById("gasBtn");
+  gasBtn.addEventListener("pointerdown", e => { e.preventDefault(); gasBtn.setPointerCapture(e.pointerId); gas(true); });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => gasBtn.addEventListener(ev, () => gas(false)));
+  gasBtn.addEventListener("contextmenu", e => e.preventDefault());
+  document.getElementById("upBtn").addEventListener("click", () => shift(1));
+  document.getElementById("downBtn").addEventListener("click", () => shift(-1));
+  window.addEventListener("keydown", e => {
+    if (e.code === "Space") { e.preventDefault(); if (!e.repeat) gas(true); }
+    else if (e.code === "ArrowUp" || e.code === "ArrowRight") { e.preventDefault(); shift(1); }
+    else if (e.code === "ArrowDown" || e.code === "ArrowLeft") { e.preventDefault(); shift(-1); }
+    else if (!e.repeat) {
+      // keyboard shortcuts for everything on the control row (the kiosk view has no mouse)
+      const click = sel => { const el = document.querySelector(sel); if (el) el.click(); };
+      const keys = { KeyK: "#keyBtn", KeyE: "#engBtn", Digit1: '[data-mode="eco"]', Digit2: '[data-mode="normal"]', Digit3: '[data-mode="sport"]',
+                     KeyC: "#tCold", KeyH: "#tHot", KeyM: "#tCel", KeyF: "#tFill", KeyI: "#tIce", KeyL: "#tLink" };
+      if (keys[e.code]) { e.preventDefault(); click(keys[e.code]); }
+    }
+  });
+  window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
+  if (typeof __exportCluster === "function") __exportCluster({
+    step, draw, paintBackgroundTo, paintChromeTo, chromePieces, pieceState, washAlpha,
+    setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
+  });
+  window.addEventListener("blur", () => gas(false));
+})();
+</script>
