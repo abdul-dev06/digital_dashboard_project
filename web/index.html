@@ -1788,7 +1788,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   ];
   function drawLamps(bulb) {
     for (const L of LAMPS) {
-      const on = bulb || L.on(), col = on ? L.col() : LAMP_OFF, img = iconImg(L.g, col);
+      const on = bulb || (ignition() !== "acc" && L.on()), col = on ? L.col() : LAMP_OFF, img = iconImg(L.g, col);   // all off before ON
       const s = LAMP_SIZE, x = L.x - s / 2;
       if (on) {                                                  // pool of light on the floor under a lit lamp
         ctx.beginPath(); ctx.ellipse(L.x, LAMP_BASE + 2, 20, 4.5, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(col, 0.14); ctx.fill();
@@ -2016,7 +2016,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     withAlpha(A.dash, () => {
 
       const by = BT + 5;
-      section("lamps", [lamp, ENGINE.state, ...LAMPS.map(L => L.on() ? L.col() : "")], () => drawLamps(lamp));
+      section("lamps", [lamp, ENGINE.state, ignition(), ...LAMPS.map(L => L.on() ? L.col() : "")], () => drawLamps(lamp));
       // engine just started: a light runs out along the far edge of the floor from the centre
       if (ENGINE.runFx < 1.4) {
         const p = ENGINE.runFx / 1.4, e = easeOut(p);
@@ -2220,20 +2220,28 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   let start = null, looping = false, powered = false, lastTs = 0;
   let redK = 0, logoT = 0, logoMoving = false, perfMs = 0, perfShown = 0;
   // ================= Live data (OBD2) =================
-  // The Qt build reads obd/reader.py's output and calls feed() ~20x a second. mode "live" or "sim":
-  // real values drive the cluster instead of the toy. "noecu": cable but no answer (link lamp on,
-  // toy stays). "demo" (no cable) and the web prototype: the toy, driven by the keyboard.
-  const LIVE = { on: false, at: 0, v: {} };
+  // The Qt build reads obd/reader.py's output and calls feed() ~20x a second. With the cable in
+  // ("live", "sim", or "noecu" when the ECU is silent) real data drives the cluster instead of the toy.
+  // "demo" (no cable) and the web prototype: the toy, driven by the keyboard.
+  // Ignition, as far as OBD can tell (the ECU only wakes at ON; pin 16 is always live):
+  //   acc  cable in, ECU silent: OFF or ACC. In the car the Rock64 runs off ACC, so running = ACC.
+  //        Gauges at zero, warning lamps off, like a real cluster before ON.
+  //   on   ECU answering, engine not running (key ON: check engine + battery lamps lit)
+  //   run  engine running (rpm >= runRpm)
+  const LIVE = { on: false, ecu: false, at: 0, v: {}, wasLive: false };
   function feed(m) {
     if (!m) return;
-    const live = m.mode === "live" || m.mode === "sim";
-    if (live) { LIVE.v = m; LIVE.at = performance.now() / 1000; }
-    if (live !== LIVE.on) { LIVE.on = live; D.gas = false; if (live) D.engine = "off"; }
-    if (!live) S.obdLink = m.mode !== "noecu";
+    const cable = m.mode === "live" || m.mode === "sim" || m.mode === "noecu";
+    const ecu = m.mode === "live" || m.mode === "sim";
+    if (ecu) { LIVE.v = m; LIVE.at = performance.now() / 1000; }
+    if (cable !== LIVE.on) { LIVE.on = cable; D.gas = false; if (cable) D.engine = "off"; }
+    LIVE.ecu = ecu;
+    if (cable) LIVE.wasLive = true;
+    S.obdLink = cable || !LIVE.wasLive;          // OBD lamp: the cable stopped answering after working
   }
+  const ignition = () => !LIVE.on ? "on" : !LIVE.ecu ? "acc" : D.engine === "run" ? "run" : "on";
   function liveStep(dt) {
-    const v = LIVE.v, fresh = performance.now() / 1000 - LIVE.at < CFG.liveStale;
-    S.obdLink = fresh;
+    const v = LIVE.v, fresh = LIVE.ecu && performance.now() / 1000 - LIVE.at < CFG.liveStale;
     const ease = 1 - Math.exp(-dt / CFG.liveEase);
     const tr = fresh ? (v.rpm || 0) : 0, ts = fresh ? (v.speed || 0) : 0;
     D.rpm += (tr - D.rpm) * ease;
@@ -2247,6 +2255,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function step(ts) {
     if (start === null) start = ts;
+    // the engine started while the intro (played at ACC) is still running: skip to the end, straight to rpm
+    if (!powered && LIVE.ecu && (LIVE.v.rpm || 0) >= CFG.runRpm) start = Math.min(start, ts - T.end * 1000 - 1);
     const intro = !powered && animate((ts - start) / 1000);
     if (!powered && !intro) powered = true;
     const blending = updateTheme(performance.now() / 1000);   // same clock as MODE.t0

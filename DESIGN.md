@@ -263,9 +263,20 @@ Also available but unused: absolute load (43), relative throttle (45), barometri
   - the OBD link lamp lights after `CFG.liveStale` (2 s) without data.
   
   `noecu` keeps the demo but lights the link lamp.
+- **Ignition:** the ECU only wakes at ON and OBD pin 16 is always live, so OBD can't tell OFF from ACC. The Rock64 is meant to run off an ACC-switched supply, so the cluster starting up *is* ACC.
+
+  | State | Detected when | Cluster shows |
+  |---|---|---|
+  | `acc` | cable in, ECU silent | gauges at zero, every warning lamp off, like a real cluster before ON |
+  | `on` | ECU answers, engine not running | check engine and battery lamps lit |
+  | `run` | rpm ≥ `CFG.runRpm` | live gauges |
+
+  - The intro plays at start-up (ACC). If the engine starts while it is still playing, `step()` jumps it to its end, straight to live rpm.
+  - Going back to ACC later just drops to `acc`: no replay, no demo.
+  - The OBD link lamp now means the cable stopped answering after it had worked. A silent ECU is normal at ACC.
 - **Lifecycle:** `qt/run.sh` starts the reader (`CLUSTER_OBD=sim` for made-up data, `off` for none) and stops it when the cluster quits. The reader also exits if its parent dies.
 - **Testing:**
-  - `obd/fake_openport.py` emulates the cable and an ECU on a pseudo-terminal; options `--no-multi` and `--silent`.
+  - `obd/fake_openport.py` emulates the cable and an ECU on a pseudo-terminal; options `--no-multi`, `--silent`, and `--key A,B` (ACC for A s, key ON for B s, then running).
   - Against it: about 115 replies/s with an 8 ms simulated round trip, the multi-PID fallback, `noecu`, and the full path into the dashboard.
 - **CPU:** a few percent of one core; the dashboard cost is unchanged.
 

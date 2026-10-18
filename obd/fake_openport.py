@@ -7,16 +7,24 @@ without the cable or the car. Speaks the cable's protocol (see reader.py) on a p
 
 Options: --no-multi  the ECU answers only the first PID of a request (tests the reader's fallback)
          --silent    the ECU never answers (car off)
+         --key A,B   ignition script: ECU silent (ACC) for A s, then key ON (rpm 0) for B s, then running
 """
 import math, os, sys, time, tty
 
 NO_MULTI, SILENT = "--no-multi" in sys.argv, "--silent" in sys.argv
+KEY = [float(x) for x in sys.argv[sys.argv.index("--key") + 1].split(",")] if "--key" in sys.argv else None
 T0 = time.time()
+
+
+def ignition():
+    if not KEY: return "silent" if SILENT else "run"
+    t = time.time() - T0
+    return "silent" if t < KEY[0] else "on" if t < KEY[0] + KEY[1] else "run"
 
 
 def ecu_value(pid):
     t = time.time() - T0
-    rpm = 800 + 2500 * (0.5 + 0.5 * math.sin(t / 3))
+    rpm = 0 if ignition() == "on" else 800 + 2500 * (0.5 + 0.5 * math.sin(t / 3))
     return {
         0x01: bytes([0x00, 0x07, 0xE5, 0x00]),
         0x04: bytes([int(30 * 2.55)]), 0x05: bytes([88 + 40]), 0x0E: bytes([int((12 + 64) * 2)]),
@@ -59,7 +67,7 @@ def main():
             elif verb.startswith("att"):
                 can_id, data = payload[:4], payload[4:]
                 out = f"aro {seq}\r\n".encode() + frame(6, 0x10, can_id)
-                if not SILENT and int.from_bytes(can_id, "big") == 0x7E0 and data[:1] == b"\x01":
+                if ignition() != "silent" and int.from_bytes(can_id, "big") == 0x7E0 and data[:1] == b"\x01":
                     pids = list(data[1:]) if not NO_MULTI else list(data[1:2])
                     resp = b"\x41" + b"".join(bytes([p]) + ecu_value(p) for p in pids if ecu_value(p))
                     rid = (0x7E8).to_bytes(4, "big")
