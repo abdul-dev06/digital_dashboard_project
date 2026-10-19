@@ -220,7 +220,7 @@ Theme colours per mode in `THEMES`; numeral fonts per mode in `NUMFONTS`.
 
 | Key | Value | Meaning |
 |---|---|---|
-| redline | 6500 | rpm. Dial max = redline rounded up + 1000 |
+| redline | 6500 | rpm. Dial max = redline rounded up + 1000. The web profile overrides it: the Elantra is 5500 (dial to 7) |
 | idle | 760 | rpm |
 | speedMax | 220 | km/h end of speed scales |
 | ecoBand | [0.185, 0.40] | Eco shift band (fraction of redline) |

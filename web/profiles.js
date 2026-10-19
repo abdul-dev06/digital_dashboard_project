@@ -19,7 +19,7 @@ window.CAR_PROFILES = [
     logo: "../assets/hyundai/logo.png",
     logoRedline: "../assets/hyundai/logo.png",
     sounds: { start: "../assets/start.mp3", alert: "../assets/alert.mp3" },
-    engine: { redline: 6500, idle: 760, speedMax: 220, tankLitres: 55 },
+    engine: { redline: 5500, idle: 760, speedMax: 220, tankLitres: 55 },
     body: { style: "sedan", length: 4.505, width: 1.775, height: 1.48, wheelbase: 2.65,
             frontOverhang: 0.92, wheelRadius: 0.31, track: 1.53 },
   },
