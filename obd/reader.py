@@ -183,6 +183,18 @@ def parse_mode01(data):
     return out
 
 
+def supported_pids(port):
+    """Ask the ECU which mode-01 PIDs it supports (0100, 0120, 0140 bitmaps)."""
+    pids = []
+    for base in (0x00, 0x20, 0x40):
+        r = port.request([0x01, base])
+        if not r or len(r) < 6 or r[0] != 0x41 or r[1] != base: break
+        bits = int.from_bytes(r[2:6], "big")
+        pids += [base + i + 1 for i in range(32) if bits & (1 << (31 - i))]
+        if not bits & 1: break                       # bit 32 = the next bitmap exists
+    return pids
+
+
 def run_cable(dev, out):
     port = OpenPort(dev)
     try:
@@ -192,6 +204,7 @@ def run_cable(dev, out):
         due = [0.0] * len(GROUPS)
         single = [False] * len(GROUPS)           # ECU didn't answer the multi-PID request: ask one by one
         next_batt, last_ecu, polls, t_rate = 0.0, 0.0, 0, time.time()
+        checked = False                          # supported-PID list read once the ECU first answers
         while True:
             if os.getppid() == 1: return "parent gone"
             now = time.time()
@@ -209,6 +222,12 @@ def run_cable(dev, out):
                     if got:
                         last_ecu = time.time(); polls += 1
                         out.update(mode="live", **vals)
+                        if not checked:
+                            checked = True
+                            sup = supported_pids(port)
+                            if sup:
+                                out.update(force=True, supported=[f"{p:02X}" for p in sup])
+                                log("ECU supports PIDs:", " ".join(f"{p:02X}" for p in sup))
                     if len(ask) > 1 and 0 < len(got) < len(ask):
                         single[gi] = True; log("group", [hex(p) for p in ask], "-> one at a time")
             if time.time() - last_ecu > 2 and out.state.get("mode") != "noecu":

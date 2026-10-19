@@ -183,7 +183,9 @@ Derived constants: `MAXRPM`, `LIMIT`, `OP_TEMP`, `HOT_TEMP`, `COLD_REV`, `COOLAN
 
 ## 5. Data: what the car provides and how it's used
 
-Confirmed on this car with Torque + ELM327 (2026-10-15). Protocol: **CAN 11/500**.
+**Caution (2026-10-18):** the Torque readings below were taken under Torque's *Nissan Frontier* vehicle profile, so the supported-PID list, the "fuel level 2F reads 0%" note and the adapter benchmark may be the Frontier's, not the Elantra's. Confirmed on the Elantra itself with the OpenPort: CAN 11-bit/500k (the reader connects that way) and live rpm + coolant. `obd/reader.py -v` now logs the ECU's own supported-PID list (0100/0120/0140) on first contact, and writes it to the state file as `supported`; use that list to correct this section.
+
+Originally recorded with Torque + ELM327 (2026-10-15). Protocol: **CAN 11/500**.
 
 **Adapter speed:** the current adapter (Bluetooth clone) benchmarked only ~6.5 PIDs/s. On CAN a decent **USB** adapter does ~80–100 PIDs/s (Torque benchmark: generic USB clone ~85, OBDLink USB ~100). Use a USB adapter on the Rock64.
 **Speed trick for the data service:** because two modules (7E8, 7E9) are on the bus, send requests with an expected-response count (e.g. `010C1`) or address the engine directly (`AT SH 7E0`) so the adapter doesn't wait for a timeout after each reply. Also `AT AT2` (adaptive timing).
