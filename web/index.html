@@ -66,6 +66,9 @@ html.kiosk .screen { border: 0; border-radius: 0; }
   border: 1px solid var(--line); border-radius: 8px; padding: 9px 14px; cursor: pointer; }
 .filebtn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.filebtn.sel { display: inline-flex; gap: 8px; align-items: center; }
+.filebtn select { font: inherit; color: var(--fg); background: transparent; border: 0; cursor: pointer; }
+.filebtn select option { background: #0c1015; }
 .gear { min-width: 44px; text-align: center; font-size: 26px; font-weight: 300; font-variant-numeric: tabular-nums; }
 .shift { min-width: 84px; }
 .gas {
@@ -83,6 +86,9 @@ html.kiosk .screen { border: 0; border-radius: 0; }
   <div class="controls">
     <button id="keyBtn" type="button">Key on</button>
     <button id="engBtn" type="button">Start engine</button>
+    <label class="filebtn sel">Car
+      <select id="carSel" aria-label="Car profile"></select>
+    </label>
     <label class="filebtn" for="logoIn">Use my logo
       <input id="logoIn" type="file" accept="image/*">
     </label>
@@ -128,6 +134,8 @@ html.kiosk .screen { border: 0; border-radius: 0; }
 </div>
 
 <script src="openport.js"></script>
+<script src="profiles.js"></script>
+<script src="car3d.js"></script>
 <script>
 if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add("kiosk");
 (() => {
@@ -168,6 +176,16 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     liveStale: 2,             // s without fresh OBD data = OBD link lamp (live data, Qt build)
     liveEase: 0.07            // s: needles glide toward each new OBD reading (readings come ~20x a second)
   };
+  // ================= Car profile (profiles.js) =================
+  // The chosen car: its logos, chimes, engine numbers and 3D body. ?car=<id> in the address picks one.
+  const PROFILES = (typeof window !== "undefined" && window.CAR_PROFILES) || [];
+  const PROFILE = (() => {
+    let id = null;
+    try { id = (location.search.match(/[?&]car=([\w-]+)/) || [])[1] || localStorage.getItem("clusterProfile"); } catch (e) {}
+    return PROFILES.find(p => p.id === id) || PROFILES[0] || { id: "default", name: "Default", engine: {}, body: {}, sounds: {} };
+  })();
+  Object.assign(CFG, PROFILE.engine || {});
+  const pkey = k => k + ":" + PROFILE.id;               // per-profile storage keys (your own logos and chimes)
   const REDLINE = CFG.redline;
   const MAXRPM = Math.ceil(REDLINE / 1000 + 1) * 1000;   // dial runs at least 1000 rpm past redline
   const LIMIT = REDLINE + CFG.limiterOver;
@@ -202,6 +220,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     move: [4.5, 5.45], dashIn: [4.75, 5.8],
     lamps: [4.75, 6.5], settle: [5.4, 6.15],
     miniUp: [5.55, 6.2], miniDown: [6.2, 6.85],
+    car: [4.6, 6.8],
     end: 6.9
   };
   const clamp01 = x => Math.max(0, Math.min(1, x));
@@ -216,7 +235,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const FINAL = { tach: { x: 640, y: 212, s: 1 },    speed: { x: 322, y: 262, s: 1 } };
   const ECO_POSE = { tach: { x: 640, y: 212, s: 0.9 }, speed: { x: 640, y: 212, s: 1.47 } };   // speedo grows into the centre
 
-  const A = { logo: 0, logoScale: 1, gauges: 0, dash: 0, move: 0, lamps: false, miniUp: 0, miniDown: 0 };
+  const A = { logo: 0, logoScale: 1, gauges: 0, dash: 0, move: 0, lamps: false, miniUp: 0, miniDown: 0, car: 0 };
 
   // Returns true while still animating.
   function animate(t) {
@@ -240,6 +259,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     A.lamps = t >= T.lamps[0] && t < T.lamps[1];
     A.miniUp = smooth(seg(t, T.miniUp));
     A.miniDown = smooth(seg(t, T.miniDown));
+    A.car = easeOut(seg(t, T.car));
     return t < T.end;
   }
 
@@ -285,7 +305,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // Switching to/from Sport: the outgoing layout eases away (Normal/Eco zoom slightly toward you,
   // Sport's brackets slide out to the sides and the engine shrinks), then the incoming one arrives
   // the opposite way. Only transforms + alpha on cached images, so it costs about one extra blit.
-  const SPORT_SWITCH = { dur: 0.85, outEnd: 0.65, inStart: 0.25, slide: 90, zoom: 0.08, engineFrom: 0.82 };
+  const SPORT_SWITCH = { dur: 1.3, outEnd: 0.65, inStart: 0.25, slide: 90, zoom: 0.08, engineFrom: 0.82 };
   const SPX = { active: false, sport: 0, other: 1, off: 0, eng: 1, zoom: 1 };
   function sportTransition() {
     const toS = MODE.to === "sport", fromS = MODE.from === "sport";
@@ -397,12 +417,31 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   // Rock64-friendly glow: two wide see-through strokes under the core line.
   // No blur filter, so it costs about the same as three plain lines.
+  // Web: a real blurred glow (shadowBlur) under the line. The Rock64 build used three see-through
+  // strokes instead (no blur), which is what GLOW_CHEAP does.
+  const GLOW_CHEAP = false;
+  // soft blurred light round whatever is drawn next (needles), in screen pixels scaled to the canvas
+  function glowOn(color, blur) {
+    if (GLOW_CHEAP) return;
+    const m = ctx.getTransform ? ctx.getTransform() : null, k = m ? Math.hypot(m.a, m.b) : 1;
+    ctx.shadowColor = color; ctx.shadowBlur = blur * k;
+  }
+  function glowOff() { ctx.shadowBlur = 0; ctx.shadowColor = "rgba(0,0,0,0)"; }
   function glowStroke(color, width, blur) {
     ctx.save();
     const a0 = ctx.globalAlpha;
     ctx.strokeStyle = color;
-    ctx.globalAlpha = a0 * 0.10; ctx.lineWidth = width + blur * 1.3; ctx.stroke();
-    ctx.globalAlpha = a0 * 0.22; ctx.lineWidth = width + blur * 0.55; ctx.stroke();
+    if (GLOW_CHEAP) {
+      ctx.globalAlpha = a0 * 0.10; ctx.lineWidth = width + blur * 1.3; ctx.stroke();
+      ctx.globalAlpha = a0 * 0.22; ctx.lineWidth = width + blur * 0.55; ctx.stroke();
+    } else {
+      const m = ctx.getTransform ? ctx.getTransform() : null, k = m ? Math.hypot(m.a, m.b) : 1;
+      ctx.shadowColor = typeof color === "string" ? color : (TH.accent || "#ffffff");
+      ctx.shadowBlur = blur * 1.6 * k;
+      ctx.lineWidth = width; ctx.stroke();
+      ctx.shadowBlur = blur * 0.6 * k; ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
     ctx.globalAlpha = a0; ctx.lineWidth = width; ctx.stroke();
     ctx.restore();
   }
@@ -624,7 +663,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     ctx.beginPath(); ctx.moveTo(SCX + ca * (SR - 12), SCY + sa * (SR - 12)); ctx.lineTo(SCX + ca * (SR * 0.52), SCY + sa * (SR * 0.52));
     ctx.lineWidth = 10; ctx.strokeStyle = rgba(TH.needle, 0.18); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(SCX + ca * (SR - 10), SCY + sa * (SR - 10)); ctx.lineTo(SCX + ca * (SR * 0.54), SCY + sa * (SR * 0.54));
-    ctx.lineWidth = 3.5; ctx.strokeStyle = TH.needle; ctx.stroke();
+    ctx.lineWidth = 3.5; ctx.strokeStyle = TH.needle; glowOn(TH.needle, 14); ctx.stroke(); glowOff();
     ctx.lineCap = "butt";
 
     // digital readout in the hub (the hub disc is on the face; the needle stops short of it)
@@ -687,7 +726,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       seg(DR - 14, DR - 2 - DR * 0.5); ctx.lineWidth = 12; ctx.strokeStyle = rgba(TH.needle, 0.18); ctx.stroke();
       const g = ctx.createLinearGradient(DCX + ca * (DR - 9), DCY + sa * (DR - 9), DCX + ca * (DR - 9 - DR * 0.48), DCY + sa * (DR - 9 - DR * 0.48));
       g.addColorStop(0, TH.needle); g.addColorStop(1, rgba(TH.needle, 0.5));
-      seg(DR - 10, DR - 8 - DR * 0.48); ctx.lineWidth = 4; ctx.strokeStyle = g; ctx.stroke();
+      seg(DR - 10, DR - 8 - DR * 0.48); ctx.lineWidth = 4; ctx.strokeStyle = g; glowOn(TH.needle, 16); ctx.stroke(); glowOff();
       ctx.lineCap = "butt";
     }
 
@@ -1008,7 +1047,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
     const x = c.getContext("2d");
     x.drawImage(img, 0, 0, c.width, c.height);
-    const d = x.getImageData(0, 0, c.width, c.height), px = d.data;
+    let d; try { d = x.getImageData(0, 0, c.width, c.height); } catch (e) { return c; }   // file:// page: pixels can't be read back
+    const px = d.data;
     if (px[3] < 10 && px[px.length - 1] < 10) return c;    // already has a transparent background: use as is
     for (let i = 0; i < px.length; i += 4) {           // key out near-black so it sits on the dash
       const lum = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
@@ -1022,15 +1062,18 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     img.onload = () => {
       const c = prepareLogo(img);
       if (slot === "red") logoRedImg = c; else logoImg = c;
-      if (remember) { try { localStorage.setItem(slot === "red" ? "clusterLogoRed" : "clusterLogo", c.toDataURL("image/png")); } catch (e) {} }
+      if (remember) { try { localStorage.setItem(pkey(slot === "red" ? "clusterLogoRed" : "clusterLogo"), c.toDataURL("image/png")); } catch (e) {} }
       draw();
     };
     img.src = src;
   }
-  try {
-    const a = localStorage.getItem("clusterLogo"); if (a) useLogo(a, false, "main");
-    const b = localStorage.getItem("clusterLogoRed"); if (b) useLogo(b, false, "red");
-  } catch (e) {}
+  {
+    let a = null, b = null;
+    try { a = localStorage.getItem(pkey("clusterLogo")); b = localStorage.getItem(pkey("clusterLogoRed")); } catch (e) {}
+    a = a || PROFILE.logo; b = b || PROFILE.logoRedline;
+    if (a) useLogo(a, false, "main");
+    if (b) useLogo(b, false, "red");
+  }
   // Draws the emblem centred on the current origin. tint recolours it (used for the red redline flash).
   const tintCache = new WeakMap();
   function tinted(pic, color) {
@@ -1094,6 +1137,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const aTop = Math.atan2(TOP - SCY, innerX(TOP) - SCX), aBot = Math.atan2(BOT - SCY, innerX(BOT) - SCX);
     if (!chromePass) { drawTripText(); return; }
     if (chromeMode === "eco") { drawEcoTripCard(TOP, BOT); return; }
+    return;                                   // trip info is Eco-only now (Normal's crescent card below is unused)
     const path = () => {
       ctx.beginPath();
       // top edge runs over the speedo, then rolls down into the cut around it
@@ -1180,89 +1224,12 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const CAR = { x: 930, top: 108 };                   // centre x and top of the car image
   let roadOffset = 0, flowOffset = 0, carT = 0, chargeK = 0, chargeMoving = false;
   function drawCarStatus() {
-    const now = performance.now() / 1000, dt = Math.min(0.1, now - (carT || now)); carT = now;
-    const cx = CAR.x, top = CAR.top, bottom = top + CAR_H;
-
-    // spotlight
-    const midY = top + CAR_H / 2;
-    const spot = ctx.createRadialGradient(cx, midY, 10, cx, midY, 130);
-    spot.addColorStop(0, rgba(TH.car, 0.10 + 0.04 * sportA)); spot.addColorStop(1, rgba(TH.car, 0));
-    ctx.fillStyle = spot; ctx.beginPath(); ctx.ellipse(cx, midY, 90, 140, 0, 0, Math.PI * 2); ctx.fill();
-
-    // lane lines scrolling with real speed, fading out at both ends
-    const v = S.realSpeed || 0;
-    roadOffset = (roadOffset + v * CFG.roadPxPerKmh * dt) % 34;
-    flowOffset = (flowOffset + (v * 1.4) * dt) % 1000;
-    const dash = 16 + 8 * sportA;                          // sport: longer dashes, feels faster
-    const y0 = top - 20, y1 = bottom + 20;
-    for (const lx of [cx - 60, cx + 60]) {
-      for (let y = y0 - 34 + roadOffset; y < y1; y += 34) {
-        const ya = Math.max(y0, y), yb = Math.min(y1, y + dash);
-        if (yb <= ya) continue;
-        const mid = ((ya + yb) / 2 - y0) / (y1 - y0);
-        ctx.fillStyle = rgba(mixHex("#c4ccd4", TH.car, 0.35 + 0.4 * sportA), (0.22 + 0.1 * sportA) * Math.sin(Math.PI * mid));
-        rrect(lx - 1.5, ya, 3, yb - ya, 1.5); ctx.fill();
-      }
-    }
-
-    // eco: airflow lines sliding round the body
-    if (ecoA > 0.01) {
-      ctx.save();
-      ctx.globalAlpha *= ecoA;
-      ctx.setLineDash([10, 16]); ctx.lineDashOffset = -flowOffset;
-      ctx.lineWidth = 1.5; ctx.lineCap = "round";
-      for (const side of [-1, 1]) {
-        for (let i = 0; i < 3; i++) {
-          const spread = 58 + i * 7, inner = 34 + i * 6;
-          ctx.beginPath();
-          ctx.moveTo(cx + side * 6, top - 16 - i * 4);
-          ctx.bezierCurveTo(cx + side * spread, top + 22, cx + side * spread, bottom - 30, cx + side * inner, bottom + 18 + i * 6);
-          ctx.strokeStyle = rgba(THEMES.eco.car, 0.5 - i * 0.12);
-          ctx.stroke();
-        }
-      }
-      ctx.restore();
-    }
-
-    // car image, cross-faded between modes; sport sits a little wider and lower
-    const stX = 1 + 0.06 * sportA, stY = 1 - 0.02 * sportA;
-    ctx.save();
-    ctx.translate(cx, top + CAR_H / 2); ctx.scale(stX, stY); ctx.translate(-cx, -(top + CAR_H / 2));
-    ctx.drawImage(carFor("eco"), cx - CAR_W / 2, top, CAR_W, CAR_H);   // top-view car is Eco-only now
-    ctx.restore();
-
-    // sport: tail lights glow
-    if (sportA > 0.01) {
-      ctx.save(); ctx.globalAlpha *= sportA;
-      const ty = top + CAR_H * 0.965, hw = CAR_W * stX / 2;
-      for (const side of [-1, 1]) {
-        ctx.beginPath(); ctx.moveTo(cx + side * hw * 0.66, ty - 1); ctx.lineTo(cx + side * hw * 0.34, ty + 2);
-        glowStroke("#ff2d3f", 3, 10);
-      }
-      ctx.restore();
-    }
-
-    // hood heat glow: blue when cold, red when hot, nothing in between
+    const cx = CAR.x, bottom = CAR.top + CAR_H;
     const t = S.coolant;
-    const cold = Math.max(0, Math.min(1, (OP_TEMP - t) / 40));
-    const hot = Math.max(0, Math.min(1, (t - HOT_TEMP) / 8));
-    const glow = (col, amt) => {
-      if (amt <= 0.01) return;
-      const hy = top + CAR_H * 0.17;
-      const g = ctx.createRadialGradient(cx, hy, 4, cx, hy, 46);
-      g.addColorStop(0, rgba(col, 0.55 * amt)); g.addColorStop(1, rgba(col, 0));
-      ctx.save(); ctx.globalCompositeOperation = "lighter";
-      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx, hy, 40, 34, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-    };
-    const pulse = hot > 0 ? 0.7 + 0.3 * Math.sin(now * 6) : 1;
-    glow("#3d8bff", cold);
-    glow("#ff2d3f", hot * pulse);
-
+    const cold = Math.max(0, Math.min(1, (OP_TEMP - t) / 40)), hot = Math.max(0, Math.min(1, (t - HOT_TEMP) / 8));
     // status lines under the car: charging always, engine temp only when it matters
     const sy = bottom + 14;
     drawChargeRow(cx, sy);
-
     const tempMsg = cold > 0 ? ["WARMING UP", "#6fa8ff"] : hot > 0 ? ["ENGINE HOT", "#ff2d3f"] : null;
     if (tempMsg) text(tempMsg[0], cx, sy + 20, 9, tempMsg[1], { align: "center", base: "middle", ls: 2 });
   }
@@ -1596,12 +1563,92 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   function drawNormalVehicle() {
     const t = S.coolant;
     const cold = Math.max(0, Math.min(1, (OP_TEMP - t) / 40)), hot = Math.max(0, Math.min(1, (t - HOT_TEMP) / 8));
-    const pulse = hot > 0 ? 0.7 + 0.3 * Math.sin(performance.now() / 1000 * 6) : 1;
-    drawRoadLive(NROAD, "normal", hot > 0 ? hot * pulse : -cold);
     drawChargeRow(NROAD.cx, 84);
     const msg = cold > 0 ? ["WARMING UP", "#6fa8ff"] : hot > 0 ? ["ENGINE HOT", "#ff2d3f"] : null;
     if (msg) text(msg[0], NROAD.cx, 102, 9, msg[1], { align: "center", base: "middle", ls: 2 });
   }
+
+  // ================= 3D car (car3d.js) =================
+  // One car, built from the profile's measurements, seen by a camera that moves with the drive mode:
+  //   eco     from above and behind, in the right panel
+  //   normal  chasing it down the road, in the right panel
+  //   sport   it flies to the middle, turns to face you, and the camera dives through the hood into
+  //           the engine drawing; leaving Sport plays that backwards
+  // Eco <-> Normal: the car spins a full turn on its way to the new angle.
+  const CAR3D = window.Car3D ? Car3D.build(PROFILE.body) : null;
+  const CARCAM = {
+    eco:    { cx: 922, cy: 206, F: 520, yaw: 16, pitch: 48, dist: 13, ty: 0.6, tz: 0, ground: 0.5, a: 1 },
+    normal: { cx: 945, cy: 302, F: 780, yaw: 8, pitch: 13, dist: 13, ty: 0.75, tz: 0, ground: 1, a: 1 },
+    hero:   { cx: 640, cy: 240, F: 880, yaw: 205, pitch: 11, dist: 13, ty: 0.7, tz: 0, ground: 0, a: 1 },
+    dive:   { cx: 640, cy: 236, F: 1000, yaw: 180, pitch: 22, dist: 1.6, ty: 1.0, tz: CAR3D ? CAR3D.zf : 1.4, ground: 0, a: 0 },
+  };
+  const restPose = m => m === "sport" ? CARCAM.dive : CARCAM[m];
+  const CAM = { keys: null, t0: 0, dur: 1.3 };
+  const lerpPose = (a, b, k) => { const o = {}; for (const key in a) o[key] = a[key] + (b[key] - a[key]) * k; return o; };
+  function camPose(now) {
+    if (!CAM.keys) return restPose(MODE.to);
+    const p = Math.min(1, (now - CAM.t0) / CAM.dur), K = CAM.keys;
+    if (p >= 1) { CAM.keys = null; return restPose(MODE.to); }
+    let i = 1; while (i < K.length - 1 && p > K[i].at) i++;
+    const a = K[i - 1], b = K[i], k = easeInOut(Math.max(0, Math.min(1, (p - a.at) / (b.at - a.at))));
+    return lerpPose(a.pose, b.pose, k);
+  }
+  // nearest yaw to `from` that equals `to` (mod 360), plus `turns` extra full turns in direction dir
+  const yawFrom = (from, to, turns = 0, dir = 1) => {
+    let y = to + 360 * Math.round((from - to) / 360);
+    return y + 360 * turns * dir;
+  };
+  function carMove(from, to) {
+    if (!CAR3D) return;
+    const now = performance.now() / 1000, cur = camPose(now);
+    const dest = restPose(to), dir = to === "normal" ? 1 : -1;
+    let keys;
+    if (to === "sport") {
+      const hy = cur.yaw + ((CARCAM.hero.yaw - cur.yaw) % 360 + 360) % 360;      // keep turning the same way to face us
+      const hero = Object.assign({}, CARCAM.hero, { yaw: hy });
+      keys = [{ at: 0, pose: cur }, { at: 0.55, pose: hero },
+              { at: 1, pose: Object.assign({}, CARCAM.dive, { yaw: hy - (CARCAM.hero.yaw - CARCAM.dive.yaw) }) }];
+    } else if (from === "sport") {
+      const hero = Object.assign({}, CARCAM.hero, { yaw: CARCAM.hero.yaw });
+      keys = [{ at: 0, pose: Object.assign({}, CARCAM.dive, { a: 0 }) }, { at: 0.4, pose: hero },
+              { at: 1, pose: Object.assign({}, dest, { yaw: dest.yaw + 360 }) }];
+    } else {
+      const end = Object.assign({}, dest, { yaw: yawFrom(cur.yaw, dest.yaw, 1, dir) });
+      const mid = lerpPose(cur, end, 0.5); mid.pitch += 16; mid.dist *= 1.08;
+      keys = [{ at: 0, pose: cur }, { at: 0.5, pose: mid }, { at: 1, pose: end }];
+    }
+    Object.assign(CAM, { keys, t0: now, dur: to === "sport" || from === "sport" ? SPORT_SWITCH.dur : 1.3 });
+  }
+  // live motion: distance travelled (road), wheel turn, body pitch from braking / accelerating
+  const CARLIVE = { travel: 0, wheel: 0, pitch: 0, lastV: 0 };
+  function carUpdate(dt) {
+    const v = (S.realSpeed || 0) / 3.6;
+    CARLIVE.travel += v * dt;
+    CARLIVE.wheel -= v * dt / (CAR3D ? CAR3D.r : 0.3);
+    const acc = dt > 0 ? (v - CARLIVE.lastV) / dt : 0; CARLIVE.lastV = v;
+    const target = Math.max(-0.035, Math.min(0.05, -acc * 0.006));       // braking: nose down; accelerating: squat
+    CARLIVE.pitch += (target - CARLIVE.pitch) * Math.min(1, dt * 5);
+  }
+  function drawCar3D(part) {
+    if (!CAR3D) return;
+    const now = performance.now() / 1000;
+    let pose = camPose(now);
+    if (!powered) {                                     // power-on: the car spins in as the dash appears
+      const k = A.car;
+      pose = Object.assign({}, pose, { yaw: pose.yaw - 260 * (1 - k), dist: pose.dist * (1 + 0.9 * (1 - k)), a: pose.a * k });
+    }
+    const t = S.coolant;
+    const cold = Math.max(0, Math.min(1, (OP_TEMP - t) / 40)), hot = Math.max(0, Math.min(1, (t - HOT_TEMP) / 8));
+    const pulse = hot > 0 ? 0.7 + 0.3 * Math.sin(now * 6) : 1;
+    const st = {
+      view: pose, line: TH.car, accent: TH.accent, parts: part,
+      alpha: part === "ground" ? pose.ground : pose.a, groundAlpha: 1,
+      travel: CARLIVE.travel, wheelTurn: CARLIVE.wheel, bodyPitch: CARLIVE.pitch,
+      brake: brakeK, turnL: S.leftTurn, turnR: S.rightTurn, heat: hot > 0 ? hot * pulse : -cold,
+    };
+    Car3D.render(ctx, CAR3D, st);
+  }
+  const carAnimating = () => !!CAM.keys;
 
   function placed(which) {
     const a = INTRO[which], f = FINAL[which], e = ECO_POSE[which], k = ecoA;
@@ -1643,7 +1690,6 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     accentArc(Math.PI - aBotL, Math.PI - aBotL - 0.42, true);
     ctx.beginPath(); ctx.moveTo(250, PT); ctx.lineTo(150, PT); glowStroke(rgba(TH.accent, 0.8), 2, 6);
     ctx.beginPath(); ctx.moveTo(W - 250, PT); ctx.lineTo(W - 150, PT); glowStroke(rgba(TH.accent, 0.8), 2, 6);
-    if (chromeMode === "normal") drawRoadStatic(NROAD);
     drawTrips();
     ctx.restore();
   }
@@ -1944,8 +1990,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       // ---------- LEFT: trip section ----------
       // Everything here is counted on the device from speed and time.
       const avg = S.tripTime > 30 ? Math.round(S.tripDist / (S.tripTime / 3600)) : -1;
-      section("trips", [S.tripA.toFixed(1), S.tripB.toFixed(1), S.tripDist.toFixed(1), fmtTime(S.tripTime), avg,
-                        S.avgL100 === null ? "" : S.avgL100.toFixed(1)], drawTrips);
+      if (ecoA > 0.01) withAlpha(ecoA, () => section("trips", [S.tripA.toFixed(1), S.tripB.toFixed(1), S.tripDist.toFixed(1),
+        fmtTime(S.tripTime), avg, S.avgL100 === null ? "" : S.avgL100.toFixed(1)], drawTrips));      // Eco only
       // the bar level and leaf fade ease in econUpdate(), so they are deps too
       if (ecoA > 0.01) withAlpha(ecoA, () => section("economy", [Math.round(S.rpm / 5), Math.round(econShown * 2000), leafK,
         (S.realSpeed || 0) < 1, S.l100 === null ? "" : S.l100.toFixed(1), S.lph.toFixed(1)], drawEconomy));
@@ -1960,6 +2006,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
         const hot = S.coolant > HOT_TEMP;          // hot: the glow pulses, so it redraws every frame
         section("vehicle", [roadZ, chargeK, brakeK, Math.round(S.coolant), hot ? performance.now() : 0], drawNormalVehicle);
       });
+
+      // the road under the 3D car, inside the right panel
+      ctx.save(); sidePanelPath(true); ctx.clip(); ctx.beginPath(); ctx.rect(0, 0, 1100, H); ctx.clip();   // stops short of the rings
+      drawCar3D("ground"); ctx.restore();
 
       // rings: sweep to full, then settle on the real value
       const ring = (min, max, real) => A.miniDown > 0 ? lerp(max, real, A.miniDown) : lerp(min, max, A.miniUp);
@@ -1994,6 +2044,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), () => section("sportM", [crank, engHeat, chargeK, Math.round(S.intakeTemp),
         Math.round(S.engineLoad), S.timing.toFixed(0), Math.round(S.rpm / 5), Math.min(MT, 1), flashing ? now : 0], drawSportMiddle, SPORT_M_BOX));
     }
+    withAlpha(A.dash, () => drawCar3D("car"));
     if (ecoA > 0.5) speedo();
 
     // turn signals: tucked into the top of the side panels, or beside the logo in Sport
@@ -2048,7 +2099,25 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       text(Math.round(S.outsideTemp) + "°C", DCX + 52, BB - 9, 13, "#9aa6b2", { base: "alphabetic" });
     });
 
+    bloom();
     drawTop();
+  }
+  // Bloom: a blurred copy of only the bright parts, added back on top. Everything lit (needles, rings,
+  // lines, the car, numbers) gets a soft glow for the cost of two quarter-size image copies a frame.
+  const BLOOM = { amount: 0.42, cv: null };
+  function bloom() {
+    if (LAYERED || BLOOM.amount <= 0 || !("filter" in ctx) || A.dash <= 0) return;
+    const w = Math.max(1, Math.round(cv.width / 4)), h = Math.max(1, Math.round(cv.height / 4));
+    if (!BLOOM.cv) BLOOM.cv = document.createElement("canvas");
+    const b = BLOOM.cv; if (b.width !== w || b.height !== h) { b.width = w; b.height = h; }
+    const x = b.getContext("2d");
+    x.globalCompositeOperation = "copy";
+    x.filter = `contrast(2.4) brightness(0.85) blur(${Math.max(1.5, w / 360).toFixed(1)}px)`;   // dark parts drop out
+    x.drawImage(cv, 0, 0, w, h); x.filter = "none";
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = BLOOM.amount * A.dash;
+    ctx.drawImage(b, 0, 0, cv.width, cv.height);
+    ctx.restore();
   }
   // Overlays above everything: the warning popup and the start-up logo. They are sections, so in Qt
   // each is drawn once and its fade / slide / zoom is done by the GPU.
@@ -2065,9 +2134,13 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const startChime = () => playSound("start");
   function setSound(slot, src, remember) {
     SND[slot] = new Audio(src);
-    if (remember) { try { localStorage.setItem("clusterSnd_" + slot, src); } catch (e) {} }
+    if (remember) { try { localStorage.setItem(pkey("clusterSnd_" + slot), src); } catch (e) {} }
   }
-  try { for (const k of ["start", "alert"]) { const v = localStorage.getItem("clusterSnd_" + k); if (v) setSound(k, v, false); } } catch (e) {}
+  for (const k of ["start", "alert"]) {
+    let v = null; try { v = localStorage.getItem(pkey("clusterSnd_" + k)); } catch (e) {}
+    v = v || (PROFILE.sounds || {})[k];
+    if (v) setSound(k, v, false);
+  }
   function playSound(slot) {
     const a = SND[slot]; if (!a) return;
     try { a.currentTime = 0; const p = a.play(); if (p) p.catch(() => {}); } catch (e) {}
@@ -2281,12 +2354,12 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       if (ENGINE.runFx < 1.5 || ENGINE.lowVoltT > 0) moving = true;
       S.rpm = D.rpm + (MODE.to === "sport" && MT < 0.75 && ENGINE.state === "running" ? 0.5 * REDLINE * Math.sin(Math.PI * MT / 0.75) : 0);
       if (!LIVE.on) toySensors(dt);
-      updateDerived(dt); roadUpdate(dt); traceUpdate(dt); econUpdate(dt);
+      updateDerived(dt); roadUpdate(dt); carUpdate(dt); traceUpdate(dt); econUpdate(dt);
     }
     currentAlert = updateAlerts(ts / 1000);
     if (currentAlert || ALERTS.some(a => a.active)) moving = true;
     const flashing = sportA > 0.01 && S.rpm >= REDLINE;
-    looping = intro || blending || flashing || moving || logoMoving || chargeMoving || brakeMoving || (powered && sportA > 0.01);   // Sport: trace keeps scrolling
+    looping = intro || blending || flashing || moving || carAnimating() || logoMoving || chargeMoving || brakeMoving || (powered && sportA > 0.01);   // Sport: trace keeps scrolling
     return looping;
   }
   function frame(ts) {
@@ -2299,6 +2372,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function kick() { if (!looping) { looping = true; lastTs = 0; requestAnimationFrame(frame); } }
   function setMode(m, instant) {
+    if (!instant && m !== MODE.to) carMove(MODE.to, m); else if (instant) CAM.keys = null;
     MODE.from = instant ? m : MODE.to; MODE.to = m;
     MODE.dur = (MODE.from === "sport") !== (m === "sport") ? SPORT_SWITCH.dur : 0.6;
     MODE.t0 = instant ? -1e9 : performance.now() / 1000;
@@ -2361,6 +2435,16 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     r.readAsDataURL(f);
   });
   document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
+  const carSel = document.getElementById("carSel");
+  if (carSel) {
+    for (const p of PROFILES) { const o = document.createElement("option"); o.value = p.id; o.textContent = p.name; carSel.appendChild(o); }
+    carSel.value = PROFILE.id;
+    carSel.addEventListener("change", () => {          // a new car changes the dials too: start over with it
+      try { localStorage.setItem("clusterProfile", carSel.value); } catch (e) {}
+      if (/[?&]car=/.test(location.search)) location.search = location.search.replace(/[?&]car=[\w-]+/, "");
+      else location.reload();
+    });
+  }
   const gasBtn = document.getElementById("gasBtn");
   gasBtn.addEventListener("pointerdown", e => { e.preventDefault(); gasBtn.setPointerCapture(e.pointerId); gas(true); });
   ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => gasBtn.addEventListener(ev, () => gas(false)));

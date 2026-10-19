@@ -12,6 +12,44 @@ Keep it updated with every design or data change (see the change log at the bott
 
 ---
 
+## 0. Web version: car profiles, 3D car, glow (2026-10-19)
+
+**Car profiles (`web/profiles.js`):** one block per car. A profile holds:
+- the main logo and the redline logo (paths from `web/`, or null for the built-in emblem);
+- the start and alert chimes;
+- engine numbers that override `CFG`: redline, idle, speedometer end, tank size;
+- the body measurements for the 3D car.
+
+Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing car reloads the page, because the dials are built from `CFG`. Logos and chimes added with the page buttons are stored per profile in the browser (`<key>:<profile id>`). Starter profiles: 2007 Elantra (the supplied logos and chimes), 2017 Tucson and 2015 Forte Koup (measurements only).
+
+**3D car (`web/car3d.js`):** a wireframe car with no libraries.
+- **How it's built:** a loft through cross-sections. A body style (sedan, coupe, hatch, suv) gives the silhouette as fractions: bottom, belt line, top, the width of the top, the body width, and where the glass sits. The profile's length, width, height, wheelbase, front overhang, wheel radius and track scale it to the real car. Wheel arches are cut over each axle.
+- **How it's drawn:** each face is filled dark with simple lighting, and its edges are stroked in the theme's car colour. Glass is darker; headlights and taillights are lit; far-side edges show faintly. Faces are drawn back to front, and back faces are only outlined.
+- **Live behaviour:**
+  - wheels turn with speed and the road scrolls;
+  - the nose dives under braking and squats under acceleration;
+  - brake lights come on;
+  - amber corner lights blink with the turn signals;
+  - the hood glows blue when the engine is cold and red when it's hot.
+- **Camera per mode (`CARCAM` in `index.html`):**
+
+  | Mode | Where the car is | View |
+  |---|---|---|
+  | Eco | right panel | from above and behind |
+  | Normal | right panel | chase view on the road, which replaces the old flat road and rear-view car |
+  | Sport | hidden | the camera has dived into the engine |
+
+- **Moves:**
+  - Eco ↔ Normal: a full spin with a lift (1.3 s).
+  - Into Sport: the car flies to the middle, turns to face you (`hero`), then the camera dives through the hood into the engine drawing (`dive`) as the Sport layout arrives. `SPORT_SWITCH.dur` is now 1.3 s.
+  - Out of Sport: the same move backwards.
+  - Power-on: the car spins in with the dash (`T.car`).
+- **Ground:** clipped to the right panel, and stops short of the rings.
+
+**Trip info:** shown in Eco only. Normal's left panel is now just the speedometer.
+
+**Glow:** `glowStroke()` uses a real blur (`shadowBlur`); `GLOW_CHEAP` brings back the Rock64 three-stroke version. The needles glow too. A **bloom** pass at the end of `draw()` adds a blurred copy of the bright parts back on top (`BLOOM.amount`, 0.42): a quarter-size canvas with a contrast threshold, then blurred. That's about two image copies a frame. Draw time in desktop Chrome is about 3 ms a frame.
+
 ## 1. Architecture (web prototype → Qt)
 
 Everything is drawn on one canvas in a fixed 1280×480 coordinate space, scaled to the screen.
@@ -321,3 +359,4 @@ Key on (replays the key-on sequence, engine off), Start engine / Stop engine (to
 - **2026-10-14:** First Qt app (round tach + speedo, simulator). Web prototype started: curved panels, power-on sequence, drive modes, toy test drive, alerts + sounds, logo uploads, Rock64 optimisations (no blur, cached layers).
 - **2026-10-15:** Drive-mode car images; per-mode fonts with cross-fade; Eco layout (centre speedo, economy bar, wide trip card); Sport rebuilt as 40/20/40 bracket gauges + road; mode names removed from gauge centre; slim bottom strip + 8% larger graphic; turn arrows moved into panels; Sport redline background wash. Data: real sensor list from Torque; calculated fuel (MAF-based) with Filled up; voltage-based charging; outside temp beside clock; average economy on trip card; Eco live L/100 km; this file created. Protocol confirmed CAN 11/500; supported PID list recorded; voltage via PID 42; polling plan updated. Normal right panel reworked: road scene + rear-view car replaces the top-view car (kept for Eco); rings in a column; shared charging row. Sport middle: road replaced by a top-down engine bay + exhaust schematic (cat temps, λ, MAF, IAT, coolant, load, timing, charging, shift flash). Fuel calc now uses commanded λ. Exhaust redrawn realistically (header, flex, O2 bosses, heat-shielded cats, hanger, muffler, tip); MAF readout removed (still polled at 2 Hz for fuel). Bay + exhaust restyled in the Eco/top-view-car wireframe theme; animated exhaust gas pulses driven by rpm. Then compacted into an x-ray top-view car: cylinder firing removed (engine-agnostic), block heats to red toward redline, gas as small translucent flowing particles, readouts moved outside the car. Then replaced by a see-through side-view inline-4: moving pistons, firing order glow, heat to red, downward exhaust manifold with gas puffs. Then replaced by a realistic exterior end view: accessory drive in real positions with serpentine belt, timing cover, intake, heat-shielded manifold, no firing. Tailpipe smoke added. Then exhaust and cats removed (engine only, enlarged); subtle inner gradient in both Sport gauges (then made bolder). Sport logo moved over the engine, enlarged, hidden until 1000 rpm below redline (`logoShowBelow`, `logoScale`). Eco economy bar now shows rpm (scale + rpm readout) instead of % of redline; rpm in hundreds while moving, exact at idle; green leaf when efficient. Bottom-strip mode pill reads "<MODE> MODE". Bottom strip rebuilt as a wire floor with OBD lamps standing on it (check engine, battery, coolant, low fuel, ice, OBD link), bulb check at key on; key on and engine start separated (engine state from rpm, crank/flare in the toy, battery-not-charging alert). Sport switches reworked: overlapping leave/arrive choreography (zoom for Normal/Eco, sliding brackets + scaling engine for Sport) using only transforms on cached images.
 - **2026-10-18:** Rock64 brought up (see `SETUP.md`): Armbian Trixie minimal, Qt 6.8 + Mali-450 GPU confirmed (EGLFS). Kiosk view (`?kiosk`) + keyboard shortcuts for every control. **Qt port:** `tools/port_qt.py` generates `qt/` from `web/index.html` (shared drawing code in Qt Canvas, GPU layers for background/wash/chrome pieces, threaded live canvas). Web code gained `paintBackgroundTo`, `paintChromeTo(c, mode, clip)`, `washAlpha`, `chromePieces`, `pieceState`, `step` (split from `frame`) and `LAYERED`. Old C++/QML moved to `archive/`. First run on the Rock64 (TV over HDMI): 30 fps at key on, 3 fps with the engine running, and labels in the wrong font. Fixed the quoted font name, moved live text to native Text items, split `drawTop()` (popup + logo) out of `draw()` for its own layer. Then sections (repaint only on change), gauge face/live split and batched tick strokes; `fmtNum()` replaces `toLocaleString`.
+- **2026-10-19:** Rock64/Qt frozen; the web version is the focus. Browser OBD (WebUSB) with on-page diagnostics. Car profiles (logos, chimes, engine numbers, body). 3D wireframe car with camera moves per mode (spin between Eco and Normal, a dive into the engine for Sport, a spin-in at power-on). Trip info in Eco only. Real blur glow and a bloom pass.
