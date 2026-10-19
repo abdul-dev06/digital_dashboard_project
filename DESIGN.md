@@ -83,7 +83,7 @@ Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing c
 **Launch control (Sport only, 2026-10-19, `LAUNCH`, `LC`):** works on any car, because it's detected rather than read from the car.
 - **Arming:** the car is stopped (under 1 km/h) and the revs are held between 1500 and 3000 rpm for 2 s (brake boosting).
 - **The shot:** the engine drawing fades out (the middle piece of the Sport chrome is covered with the background) and the 3D car swoops in from the hood to a low cinematic shot from the rear left corner, on the rear left wheel (`tx`/`ty`/`tz` camera target). The camera drifts slowly, and "LAUNCH READY" pulses.
-- **Launch:** as soon as the speed rises, the wheel spins up with a burst of wheelspin (capped so the spokes don't strobe), the camera shakes briefly and pulls back, and the road scrolls. 3 s later it dives back into the engine (0.9 s).
+- **Launch:** as soon as the speed rises, the wheel spins up with a burst of wheelspin (capped so the spokes don't strobe), the camera shakes briefly and pulls back, and the road scrolls. 1 s later it dives back into the engine (0.9 s).
 - **Cancel:** the revs leave the range for 1 s without a launch, or you leave Sport.
 
 **Trip info:** shown in Eco only. Normal's left panel is now just the speedometer.

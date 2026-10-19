@@ -1710,8 +1710,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // Car stopped, revs held between 1500 and 3000 for 2 s: the engine drawing gives way to the 3D car,
   // the camera swooping from the hood round to a low shot from the rear left corner, on the rear wheel.
   // It drifts slowly while you hold it. When the car moves, the wheel spins up (a touch of wheelspin),
-  // the camera shakes, and 3 s later it dives back into the engine. Let the revs drop for 1 s to cancel.
-  const LC = { lo: 1500, hi: 3000, hold: 2, launchShow: 3, dropOut: 1, minMove: 1 };
+  // the camera shakes, and 1 s later it dives back into the engine. Let the revs drop for 1 s to cancel.
+  const LC = { lo: 1500, hi: 3000, hold: 2, launchShow: 1, dropOut: 1, minMove: 1 };
   const LAUNCH = { phase: "off", hold: 0, t: 0, out: 0, k: 0, wheel: 0, spin: 0 };
   function launchUpdate(dt) {
     const L = LAUNCH, inSport = MODE.to === "sport" && modeK >= 1 && powered;
@@ -1745,7 +1745,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const shot = { cx: 640, cy: 262, F: 600, yaw: -36 + 6 * drift, pitch: 4 + 1.5 * drift, dist: 3.4 - 0.2 * drift,
                    tx: -M.track / 2, ty: M.r * 1.05, tz: M.zr + 0.35, ground: 1, a: 1 };
     if (L.phase === "launched") {                       // pull back a little as it goes, with a short shake
-      const p = Math.min(1, L.t / 1.2), shake = Math.max(0, 1 - L.t / 0.6);
+      const p = Math.min(1, L.t / 0.8), shake = Math.max(0, 1 - L.t / 0.6);
       shot.dist += 1.1 * easeOut(p); shot.pitch += 2 * p;
       shot.cx += (Math.random() - 0.5) * 6 * shake; shot.cy += (Math.random() - 0.5) * 4 * shake;
     }
@@ -1772,8 +1772,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     });
     ctx.restore();
     // caption
-    const cap = L.phase === "armed" ? "LAUNCH READY" : L.phase === "launched" && L.t < 1.2 ? "LAUNCH" : null;
-    if (cap) withAlpha(e * (L.phase === "armed" ? 0.6 + 0.4 * Math.sin(now * 6) : 1 - L.t / 1.2), () =>
+    const cap = L.phase === "armed" ? "LAUNCH READY" : L.phase === "launched" && L.t < 0.8 ? "LAUNCH" : null;
+    if (cap) withAlpha(e * (L.phase === "armed" ? 0.6 + 0.4 * Math.sin(now * 6) : 1 - L.t / 0.8), () =>
       text(cap, 640, 378, 11, TH.accent, { weight: 700, align: "center", base: "middle", ls: 4 }));
   }
 
