@@ -7,6 +7,7 @@ Keep it updated with every design or data change (see the change log at the bott
 - **Hardware:** Pine64 Rock64 (4 GB, RK3328, Mali-450 GPU). HDMI screen, 1280×480 design canvas. OBD2 via ELM327-type adapter (use a USB one on the Rock64, see §5).
 - **Car network:** ISO 15765-4 CAN, 11-bit, 500 kbps (confirmed 2026-10-15). Responding modules: 7E8 (engine), 7E9 (transmission). Calibration ID H7NCMC0A.
 - **Source of truth for the design:** `web/index.html` (single-file canvas prototype, also published as the "Elantra Cluster" artifact).
+- **Focus (2026-10-19): the web version.** The dashboard now runs as a web page in a browser (phone/tablet, WebUSB). The Rock64/Qt side (`qt/`, `obd/reader.py`, `tools/port_qt.py`) is **frozen** as it worked in the car: don't regenerate or change it. On the web, animations, images and new features are cheap; the Rock64 performance rules below apply to `qt/` only.
 - **Qt app (`qt/`):** GENERATED from `web/index.html` by `tools/port_qt.py`. Never edit `qt/cluster.js` by hand: change the web prototype, then run `python3 tools/port_qt.py`. Only `qt/main.qml` (layers, frame loop, keys) and `tools/qt_prelude.js` (browser stand-ins) are hand-written. The first Qt version (C++/QML) is in `archive/`, outdated.
 
 ---
@@ -25,7 +26,7 @@ Everything is drawn on one canvas in a fixed 1280×480 coordinate space, scaled 
 
 **Enlarged group:** everything above the strip is drawn at `GS = 1.08` via `enterGroup()` (translate/scale), so the slim strip's freed space is used. Layout coordinates in the code are *content coordinates* (pre-scale). The strip uses screen coordinates.
 
-**Performance rules (Rock64-safe, keep these):**
+**Performance rules (Rock64-only; the web version is no longer bound by them):**
 - No blur (`shadowBlur`) anywhere. Glows use `glowStroke()`: two wide translucent strokes under a sharp one.
 - Anything static goes into a cached layer (background, chrome per mode, car images per mode, Sport rear-view car, tinted logos).
 - Live drawing is limited to simple strokes, fills, text and cached images. Target draw time stays ~0.3–0.6 ms/frame on desktop.
@@ -236,7 +237,7 @@ Also available but unused: absolute load (43), relative throttle (45), barometri
 - **Using it:** the page has a **Connect OpenPort** button. Once Chrome has been allowed to use the cable, the page connects by itself (`getDevices()` and the `connect` event). The status line shows live, noecu or demo, plus readings per second and rpm. States go to `window.clusterFeed()` → `feed()`, the same path the Qt build uses.
 - **Hosting:** WebUSB needs HTTPS, so the page is served from GitHub Pages: `https://abdul-dev06.github.io/digital_dashboard_project/web/`. Pages has to be enabled in the repo settings: Pages → Deploy from branch `main` / root.
 - **Tested** with `tools/test_openport_js.mjs` against `obd/fake_openport.py`: about 115 replies/s, the one-PID-at-a-time fallback, and the silent ECU. Fake live states fed into the page drive the gauges.
-- **First Pixel try (2026-10-19):** Chrome connected to the cable and showed noecu ("car not answering"), and the orange OBD-link lamp flashed. The lamp lights only when the feed drops back to demo after the cable worked, so flashing means the connection kept dropping and reconnecting (the USB `connect` event restarts it). Possible causes: the cable resetting (power over OTG), or USB reads failing. Not known yet.
+- **First Pixel try (2026-10-19):** Chrome connected to the cable, and the page showed noecu ("car not answering"). The cable's own LED flashed orange. On the cable, flashing orange means powered and connected to the host but no traffic with the car yet; it did the same on the Rock64 until data came through. Flashing blue/red means the host connection is lost. So the USB side works. Still to confirm: data with the key ON or the engine running.
 - **Diagnostics on the page:** under the status line, a log box shows the last 14 events:
   - USB plug and unplug, the interfaces claimed, the cable version, and mode changes;
   - every 5 s: requests sent, `aro` acks, ECU replies, received frames by channel and status, odd replies (`are …`), bytes in, and battery voltage;
