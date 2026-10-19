@@ -80,6 +80,12 @@ Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing c
 - **Page head:** the page now has a doctype, charset and viewport.
 - **Logo:** the Hyundai profiles use `assets/hyundai/logo.png` (supplied, already transparent) for both the main and the redline logo. The BMW/M files stay in `assets/` for the frozen Rock64 build.
 
+**Launch control (Sport only, 2026-10-19, `LAUNCH`, `LC`):** works on any car, because it's detected rather than read from the car.
+- **Arming:** the car is stopped (under 1 km/h) and the revs are held between 1500 and 3000 rpm for 2 s (brake boosting).
+- **The shot:** the engine drawing fades out (the middle piece of the Sport chrome is covered with the background) and the 3D car swoops in from the hood to a low cinematic shot from the rear left corner, on the rear left wheel (`tx`/`ty`/`tz` camera target). The camera drifts slowly, and "LAUNCH READY" pulses.
+- **Launch:** as soon as the speed rises, the wheel spins up with a burst of wheelspin (capped so the spokes don't strobe), the camera shakes briefly and pulls back, and the road scrolls. 3 s later it dives back into the engine (0.9 s).
+- **Cancel:** the revs leave the range for 1 s without a launch, or you leave Sport.
+
 **Trip info:** shown in Eco only. Normal's left panel is now just the speedometer.
 
 **Glow:** `glowStroke()` uses a real blur (`shadowBlur`); `GLOW_CHEAP` brings back the Rock64 three-stroke version. The needles glow too. A **bloom** pass at the end of `draw()` adds a blurred copy of the bright parts back on top (`BLOOM.amount`, 0.42): a quarter-size canvas with a contrast threshold, then blurred. That's about two image copies a frame. Draw time in desktop Chrome is about 3 ms a frame.

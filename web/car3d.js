@@ -172,11 +172,11 @@
   // yaw 0 = behind the car, 90 = on its right side, 180 = in front. pitch = degrees above.
   function camera(v) {
     const cy = Math.cos(v.yaw * DEG), sy = Math.sin(v.yaw * DEG), cp = Math.cos(v.pitch * DEG), sp = Math.sin(v.pitch * DEG);
-    const ty = v.ty, tz = v.tz || 0;
-    const pos = [sy * cp * v.dist, ty + sp * v.dist, tz - cy * cp * v.dist];
+    const tx = v.tx || 0, ty = v.ty, tz = v.tz || 0;                 // the point the camera looks at
+    const pos = [tx + sy * cp * v.dist, ty + sp * v.dist, tz - cy * cp * v.dist];
     // world -> camera: rotate about y by yaw, then tilt by pitch, then push out by dist
     function toCam(p) {
-      const x = p[0], y = p[1] - ty, z = p[2] - tz;
+      const x = p[0] - tx, y = p[1] - ty, z = p[2] - tz;
       const x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
       const y2 = cp * y + sp * z1, z2 = -sp * y + cp * z1 + v.dist;
       return [x1, y2, z2];

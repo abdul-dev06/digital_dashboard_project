@@ -1706,6 +1706,77 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   const carAnimating = () => !!CAM.keys;
 
+  // ================= Sport: launch control (brake boosting) =================
+  // Car stopped, revs held between 1500 and 3000 for 2 s: the engine drawing gives way to the 3D car,
+  // the camera swooping from the hood round to a low shot from the rear left corner, on the rear wheel.
+  // It drifts slowly while you hold it. When the car moves, the wheel spins up (a touch of wheelspin),
+  // the camera shakes, and 3 s later it dives back into the engine. Let the revs drop for 1 s to cancel.
+  const LC = { lo: 1500, hi: 3000, hold: 2, launchShow: 3, dropOut: 1, minMove: 1 };
+  const LAUNCH = { phase: "off", hold: 0, t: 0, out: 0, k: 0, wheel: 0, spin: 0 };
+  function launchUpdate(dt) {
+    const L = LAUNCH, inSport = MODE.to === "sport" && modeK >= 1 && powered;
+    const rpm = D.rpm, v = S.realSpeed || 0;
+    if (!inSport) { Object.assign(L, { phase: "off", hold: 0, t: 0, out: 0, k: 0 }); return false; }
+    if (L.phase === "off") {
+      L.hold = v < LC.minMove && rpm >= LC.lo && rpm <= LC.hi ? L.hold + dt : 0;
+      if (L.hold >= LC.hold) Object.assign(L, { phase: "armed", t: 0, out: 0 });
+    } else if (L.phase === "armed") {
+      L.t += dt;
+      if (v >= LC.minMove) Object.assign(L, { phase: "launched", t: 0, spin: 1 });
+      else { L.out = rpm < LC.lo - 300 || rpm > LC.hi + 600 ? L.out + dt : 0; if (L.out > LC.dropOut) Object.assign(L, { phase: "off", hold: 0 }); }
+    } else if (L.phase === "launched") {
+      L.t += dt;
+      if (L.t > LC.launchShow) Object.assign(L, { phase: "off", hold: 0 });
+    }
+    const target = L.phase === "armed" || L.phase === "launched" ? 1 : 0;
+    L.k = Math.max(0, Math.min(1, L.k + (target ? dt : -dt) / 0.9));          // 0.9 s swoop in / dive out
+    // the rear wheel: turns with the road, plus a burst of wheelspin as it launches; shown no faster
+    // than the eye can follow (spokes would strobe)
+    L.spin = Math.max(0, L.spin - dt / 0.8);
+    const w = v / 3.6 / (CAR3D ? CAR3D.r : 0.3) * (1 + 2.5 * L.spin);
+    L.wheel -= Math.min(w, 26) * dt;
+    return L.hold > 0 || L.phase !== "off" || L.k > 0;
+  }
+  function drawLaunchCar() {
+    const L = LAUNCH; if (!CAR3D || L.k <= 0.002) return;
+    const e = easeInOut(L.k), M = CAR3D;
+    const now = performance.now() / 1000;
+    const drift = L.phase === "launched" ? 0 : Math.sin(now * 0.45);
+    const shot = { cx: 640, cy: 262, F: 600, yaw: -36 + 6 * drift, pitch: 4 + 1.5 * drift, dist: 3.4 - 0.2 * drift,
+                   tx: -M.track / 2, ty: M.r * 1.05, tz: M.zr + 0.35, ground: 1, a: 1 };
+    if (L.phase === "launched") {                       // pull back a little as it goes, with a short shake
+      const p = Math.min(1, L.t / 1.2), shake = Math.max(0, 1 - L.t / 0.6);
+      shot.dist += 1.1 * easeOut(p); shot.pitch += 2 * p;
+      shot.cx += (Math.random() - 0.5) * 6 * shake; shot.cy += (Math.random() - 0.5) * 4 * shake;
+    }
+    const from = Object.assign({}, CARCAM.dive, { tx: 0, a: 0, ground: 0 });   // where the engine drawing "is": the hood
+    const pose = lerpPose(from, shot, e);
+    ctx.save();
+    // the shot fills the engine's part of the Sport layout (screen rects; the brackets stay untouched)
+    const m = ctx.getTransform();
+    ctx.setTransform(curScale, 0, 0, curScale, 0, 0);
+    ctx.beginPath(); for (const r of LAUNCH_RECTS) ctx.rect(r[0], r[1], r[2], r[3]); ctx.clip();
+    ctx.globalAlpha = 1;
+    withAlpha(e, () => ctx.drawImage(backgroundLayer(), 0, 0, W, H));      // hide the engine outline (it is in the chrome)
+    const fade = (x0, x1) => { const g = ctx.createLinearGradient(x0, 0, x1, 0); g.addColorStop(0, "rgba(1,2,3,0.95)"); g.addColorStop(1, "rgba(1,2,3,0)"); return g; };
+    ctx.setTransform(m);
+    Car3D.render(ctx, CAR3D, {
+      view: pose, line: TH.car, accent: TH.accent, alpha: pose.a, groundAlpha: 1, spokes: true,
+      travel: CARLIVE.travel, wheelTurn: L.wheel, bodyPitch: CARLIVE.pitch, brake: brakeK, heat: 0,
+    });
+    // soft edges so the shot sits between the Sport brackets
+    ctx.setTransform(curScale, 0, 0, curScale, 0, 0);
+    withAlpha(e, () => {
+      ctx.fillStyle = fade(SW_L, SW_L + 70); ctx.fillRect(SW_L, 0, 70, H);
+      ctx.fillStyle = fade(SW_R, SW_R - 70); ctx.fillRect(SW_R - 70, 0, 70, H);
+    });
+    ctx.restore();
+    // caption
+    const cap = L.phase === "armed" ? "LAUNCH READY" : L.phase === "launched" && L.t < 1.2 ? "LAUNCH" : null;
+    if (cap) withAlpha(e * (L.phase === "armed" ? 0.6 + 0.4 * Math.sin(now * 6) : 1 - L.t / 1.2), () =>
+      text(cap, 640, 378, 11, TH.accent, { weight: 700, align: "center", base: "middle", ls: 4 }));
+  }
+
   function placed(which) {
     const a = INTRO[which], f = FINAL[which], e = ECO_POSE[which], k = ecoA;
     const b = { x: lerp(f.x, e.x, k), y: lerp(f.y, e.y, k), s: lerp(f.s, e.s, k) };
@@ -1932,6 +2003,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // reach toward the centre, so up there the split is simply at the middle of the screen.
   const SW_L = 440, SW_R = 840, SW_TOP = 118;   // engine labels (IAT, LOAD, ADV) fall inside the middle part
   const toScreenY = y => G_TOP + (y - G_SRC_TOP) * GS;
+  // launch control shot: the middle piece, plus the strip above it where the top of the engine sits
+  const LAUNCH_RECTS = [[SW_L, SW_TOP, SW_R - SW_L, SW_CUT - SW_TOP], [512, 70, 256, SW_TOP - 70]];
   const clipRects = (...r) => () => { ctx.beginPath(); for (const q of r) ctx.rect(q[0], q[1], q[2], q[3]); };
   function blit(img, x, y, w, h, tf, alpha, clip) {
     if (alpha <= 0.002) return;
@@ -2153,8 +2226,10 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
         drawSportRight, SPORT_R_BOX));
       // engine: pulleys turn with the crank; the logo eases (redK) and flashes at redline, so time is a dep then
       const now = performance.now(), flashing = S.rpm >= REDLINE || redK > 0 || (shiftFlash && now / 1000 - shiftFlash.t < 0.9);
-      withTf(a, zoomAbout(W / 2, ENG.pose.y, SPX.eng), () => section("sportM", [crank, engHeat, chargeK, Math.round(S.intakeTemp),
+      const lk = easeInOut(LAUNCH.k);
+      withTf(a * (1 - lk), zoomAbout(W / 2, ENG.pose.y, SPX.eng * (1 + 0.15 * lk)), () => section("sportM", [crank, engHeat, chargeK, Math.round(S.intakeTemp),
         Math.round(S.engineLoad), S.timing.toFixed(0), Math.round(S.rpm / 5), Math.min(MT, 1), flashing ? now : 0], drawSportMiddle, SPORT_M_BOX));
+      if (lk > 0) withAlpha(a, drawLaunchCar);
     }
     withAlpha(A.dash, () => drawCar3D("car"));
     if (ecoA > 0.5) speedo();
@@ -2482,6 +2557,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       S.rpm = D.rpm + (MODE.to === "sport" && MT < 0.75 && ENGINE.state === "running" ? 0.5 * REDLINE * Math.sin(Math.PI * MT / 0.75) : 0);
       if (!LIVE.on) toySensors(dt);
       updateDerived(dt); roadUpdate(dt); carUpdate(dt); traceUpdate(dt); econUpdate(dt);
+      if (launchUpdate(dt)) moving = true;
     }
     currentAlert = updateAlerts(ts / 1000);
     if (currentAlert || ALERTS.some(a => a.active)) moving = true;
