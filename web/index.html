@@ -185,7 +185,9 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     return PROFILES.find(p => p.id === id) || PROFILES[0] || { id: "default", name: "Default", engine: {}, body: {}, sounds: {} };
   })();
   Object.assign(CFG, PROFILE.engine || {});
-  const pkey = k => k + ":" + PROFILE.id;               // per-profile storage keys (your own logos and chimes)
+  const pkey = k => k + ":" + PROFILE.id;
+  // Tuning switches in the address, for testing speed on a device: ?bloom=0 &cache=0 &glow=cheap &car3d=0 &scale=1
+  const QS = (() => { try { return new URLSearchParams(location.search); } catch (e) { return { get: () => null }; } })();               // per-profile storage keys (your own logos and chimes)
   const REDLINE = CFG.redline;
   const MAXRPM = Math.ceil(REDLINE / 1000 + 1) * 1000;   // dial runs at least 1000 rpm past redline
   const LIMIT = REDLINE + CFG.limiterOver;
@@ -268,7 +270,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // Both side panels have a concave inner edge cut on the dial's own circle, the
   // bottom band dips under the dial the same way, and cards overlap the panels.
   const cv = document.getElementById("cluster");
-  let ctx = cv.getContext("2d");
+  let ctx = cv.getContext("2d", { alpha: false });     // opaque: the browser can skip blending the page under it
   const W = 1280, H = 480;
   const FONT = '"DejaVu Sans", Verdana, "Segoe UI", system-ui, sans-serif';
   const RED = "#ff2d3f";
@@ -346,10 +348,13 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const toRad = a => (a - 90) * Math.PI / 180;
   const wrapX = y => Math.sqrt(Math.max(0, WRAP * WRAP - (y - DCY) * (y - DCY)));   // half-width of the cut at y
 
+  // Pixels drawn per frame are a big part of the cost on a phone. The canvas is capped at MAX_SCALE x
+  // the 1280x480 design (default 1: 1280x480 pixels, stretched to the screen). ?scale=1.5 for sharper.
+  const MAX_SCALE = +(QS.get("scale") || 1);
   function fitCanvas() {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const w = cv.clientWidth || W;
-    const scale = (w / W) * dpr;
+    const scale = Math.min(MAX_SCALE, (w / W) * dpr);
     cv.width = Math.round(W * scale);
     cv.height = Math.round(H * scale);
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -419,7 +424,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // No blur filter, so it costs about the same as three plain lines.
   // Web: a real blurred glow (shadowBlur) under the line. The Rock64 build used three see-through
   // strokes instead (no blur), which is what GLOW_CHEAP does.
-  const GLOW_CHEAP = false;
+  const GLOW_CHEAP = QS.get("glow") === "cheap";
   // soft blurred light round whatever is drawn next (needles), in screen pixels scaled to the canvas
   function glowOn(color, blur) {
     if (GLOW_CHEAP) return;
@@ -1575,7 +1580,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   //   sport   it flies to the middle, turns to face you, and the camera dives through the hood into
   //           the engine drawing; leaving Sport plays that backwards
   // Eco <-> Normal: the car spins a full turn on its way to the new angle.
-  const CAR3D = window.Car3D ? Car3D.build(PROFILE.body) : null;
+  const CAR3D = window.Car3D && QS.get("car3d") !== "0" ? Car3D.build(PROFILE.body) : null;
   const CARCAM = {
     eco:    { cx: 922, cy: 206, F: 520, yaw: 16, pitch: 48, dist: 13, ty: 0.6, tz: 0, ground: 0.5, a: 1 },
     normal: { cx: 945, cy: 302, F: 780, yaw: 8, pitch: 13, dist: 13, ty: 0.75, tz: 0, ground: 1, a: 1 },
@@ -1653,13 +1658,20 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const t = S.coolant;
     const cold = Math.max(0, Math.min(1, (OP_TEMP - t) / 40)), hot = Math.max(0, Math.min(1, (t - HOT_TEMP) / 8));
     const pulse = hot > 0 ? 0.7 + 0.3 * Math.sin(now * 6) : 1;
+    const slow = (S.realSpeed || 0) < 20;               // above this the spokes would strobe: the rim shows a blur instead
     const st = {
-      view: pose, line: TH.car, accent: TH.accent, parts: part,
+      view: pose, line: TH.car, accent: TH.accent, parts: part, spokes: slow,
       alpha: part === "ground" ? pose.ground : pose.a, groundAlpha: 1,
-      travel: CARLIVE.travel, wheelTurn: CARLIVE.wheel, bodyPitch: CARLIVE.pitch,
+      travel: CARLIVE.travel, wheelTurn: slow ? CARLIVE.wheel : 0, bodyPitch: Math.round(CARLIVE.pitch * 250) / 250,
       brake: brakeK, turnL: S.leftTurn, turnR: S.rightTurn, heat: hot > 0 ? hot * pulse : -cold,
     };
-    Car3D.render(ctx, CAR3D, st);
+    // resting in its panel: cached like any section, redrawn only when something on it moves
+    if (powered && !CAM.keys && MODE.to !== "sport") {
+      const r2 = v => Math.round(v * 100);
+      const deps = part === "ground" ? [MODE.to, r2(st.travel)]
+        : [MODE.to, r2(st.wheelTurn), st.spokes, st.bodyPitch, r2(st.brake), r2(st.heat), st.turnL, st.turnR];
+      section("car3d-" + part, deps, () => Car3D.render(ctx, CAR3D, st), [770, 28, 470, 392]);
+    } else Car3D.render(ctx, CAR3D, st);
   }
   const carAnimating = () => !!CAM.keys;
 
@@ -1740,6 +1752,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       c.width = Math.round(W * curScale); c.height = Math.round(H * curScale);
       const x = c.getContext("2d"); x.setTransform(curScale, 0, 0, curScale, 0, 0);
       paintChromeTo(x, mode);
+      bakeGlow(c, curScale);
       chromeCache[mode] = c;
     }
     return chromeCache[mode];
@@ -1952,7 +1965,61 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   // deps must cover everything the section's drawing reads (rounded to what is visible).
   // bounds (optional) = [x, y, w, h] the section draws within, in its own coordinates: Qt then
   // sizes its canvas to just that box on screen (fewer pixels to draw, upload and composite).
-  let sectionHook = null, frameSig = null;
+  let sectionHook = QS.get("cache") === "0" ? null : webSection, frameSig = null;
+  // ---- Web: the same trick as the Rock64 build ----
+  // A section with a box is drawn once into its own small canvas, with its glow (bloom) baked in, and
+  // reused until its deps, the theme or its size change. Moving or fading it is just a copy. So a
+  // steady needle, a parked car or an unchanged ring costs one image copy a frame, not a redraw.
+  const SEC = new Map();
+  let FRAME = 0, secSettling = false;
+  // A section whose inputs change every frame (a needle while revving) is simply drawn: caching it
+  // would cost more than it saves. Once it has held still for a few frames it is cached and only copied.
+  // Static faces (no deps) also get their bloom baked in once they settle.
+  const SETTLE = 4;
+  function webSection(name, deps, fn, c, sig, bounds) {
+    if (!bounds) { fn(); return; }
+    const m = c.getTransform(), k = Math.hypot(m.a, m.b);
+    const [bx, by, bw, bh] = bounds;
+    const key = JSON.stringify([deps, sig, Math.round(k * 200)]);
+    let e = SEC.get(name);
+    if (!e) { e = { cv: document.createElement("canvas"), key: null, seen: null, at: 0 }; SEC.set(name, e); }
+    if (key !== e.seen) { e.seen = key; e.at = FRAME; }
+    const still = FRAME - e.at >= SETTLE, isStatic = deps.length === 0;
+    if (!still) secSettling = true;                     // keep frames coming until it is cached
+    if (!still) { fn(); return; }
+    const want = key + (isStatic && still ? "|glow" : "");
+    if (e.key !== want) {
+      const cw = Math.max(1, Math.ceil(bw * k)), ch = Math.max(1, Math.ceil(bh * k));
+      if (e.cv.width !== cw || e.cv.height !== ch) { e.cv.width = cw; e.cv.height = ch; }
+      const x = e.cv.getContext("2d");
+      x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, cw, ch);
+      x.setTransform(k, 0, 0, k, -bx * k, -by * k); x.globalAlpha = 1;
+      const main = ctx; ctx = x;
+      try { fn(); } finally { ctx = main; }
+      if (isStatic && still) bakeGlow(e.cv, k);
+      e.key = want;
+    }
+    c.drawImage(e.cv, bx, by, bw, bh);
+  }
+  function resetCaches() {
+    SEC.clear(); for (const k in chromeCache) delete chromeCache[k];
+  }
+  // Bloom, baked into a cached picture: a blurred copy of only its bright parts, added back on top.
+  const BLOOM = { amount: QS.get("bloom") !== null ? +QS.get("bloom") : 0.42 };
+  let bloomScratch = null;
+  function bakeGlow(cvs, k) {
+    if (!BLOOM.amount || !("filter" in ctx)) return;
+    const w = Math.max(1, Math.round(cvs.width / 4)), h = Math.max(1, Math.round(cvs.height / 4));
+    if (!bloomScratch) bloomScratch = document.createElement("canvas");
+    const b = bloomScratch; if (b.width < w || b.height < h) { b.width = Math.max(b.width, w); b.height = Math.max(b.height, h); }
+    const x = b.getContext("2d");
+    x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "copy";
+    x.filter = `contrast(2.4) brightness(0.85) blur(${Math.max(1, 1.6 * k).toFixed(1)}px)`;    // dark parts drop out
+    x.drawImage(cvs, 0, 0, w, h); x.filter = "none";
+    const y = cvs.getContext("2d");
+    y.save(); y.setTransform(1, 0, 0, 1, 0, 0); y.globalCompositeOperation = "lighter"; y.globalAlpha = BLOOM.amount;
+    y.drawImage(b, 0, 0, w, h, 0, 0, cvs.width, cvs.height); y.restore();
+  }
   function section(name, deps, fn, bounds) { if (sectionHook) sectionHook(name, deps, fn, ctx, frameSig, bounds); else fn(); }
   const SPEED_BOX = [SCX - SR - 24, SCY - SR - 24, 2 * (SR + 24), 2 * (SR + 24)];   // includes the drop shade
   const TACH_BOX = [DCX - DR - 28, DCY - DR - 28, 2 * (DR + 28), 2 * (DR + 28)];
@@ -1967,7 +2034,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   }
   function draw() {
     const lamp = A.lamps;
-    if (sectionHook) frameSig = [modeK, ecoA, sportA, TH.accent, TH.tick, TH.needle, TH.redband, TH.car];
+    FRAME++; secSettling = false;
+    if (sectionHook) frameSig = [modeK, ecoA, sportA, TH.accent, TH.tick, TH.needle, TH.redband, TH.car, A.lamps];
     ctx.globalAlpha = 1;
     if (LAYERED) ctx.clearRect(0, 0, W, H);
     else { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H); }
@@ -2037,7 +2105,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
         text(Math.round(S.range) + " km range", fx, fy + 61, 9, "#7d8996", { align: "center", base: "middle", ls: 1 });
         miniGauge({ cx: 1158, cy: lerp(344, 340, E), r: 46, min: -30, max: 60, value: ri,
                     label: "INTAKE", unit: "°C", digits: 0, tint: "#9cc6ff" });
-      });
+      }, [985, 30, 240, 395]);
     });
 
     // ---------- tachometer (fades out in Eco) ----------
@@ -2087,7 +2155,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     withAlpha(A.dash, () => {
 
       const by = BT + 5;
-      section("lamps", [lamp, ENGINE.state, ignition(), ...LAMPS.map(L => L.on() ? L.col() : "")], () => drawLamps(lamp));
+      section("lamps", [lamp, ENGINE.state, ignition(), ...LAMPS.map(L => L.on() ? L.col() : "")], () => drawLamps(lamp), [0, 395, W, 85]);
       // engine just started: a light runs out along the far edge of the floor from the centre
       if (ENGINE.runFx < 1.4) {
         const p = ENGINE.runFx / 1.4, e = easeOut(p);
@@ -2112,25 +2180,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       text(Math.round(S.outsideTemp) + "°C", DCX + 52, BB - 9, 13, "#9aa6b2", { base: "alphabetic" });
     });
 
-    bloom();
     drawTop();
-  }
-  // Bloom: a blurred copy of only the bright parts, added back on top. Everything lit (needles, rings,
-  // lines, the car, numbers) gets a soft glow for the cost of two quarter-size image copies a frame.
-  const BLOOM = { amount: 0.42, cv: null };
-  function bloom() {
-    if (LAYERED || BLOOM.amount <= 0 || !("filter" in ctx) || A.dash <= 0) return;
-    const w = Math.max(1, Math.round(cv.width / 4)), h = Math.max(1, Math.round(cv.height / 4));
-    if (!BLOOM.cv) BLOOM.cv = document.createElement("canvas");
-    const b = BLOOM.cv; if (b.width !== w || b.height !== h) { b.width = w; b.height = h; }
-    const x = b.getContext("2d");
-    x.globalCompositeOperation = "copy";
-    x.filter = `contrast(2.4) brightness(0.85) blur(${Math.max(1.5, w / 360).toFixed(1)}px)`;   // dark parts drop out
-    x.drawImage(cv, 0, 0, w, h); x.filter = "none";
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = BLOOM.amount * A.dash;
-    ctx.drawImage(b, 0, 0, cv.width, cv.height);
-    ctx.restore();
   }
   // Overlays above everything: the warning popup and the start-up logo. They are sections, so in Qt
   // each is drawn once and its fade / slide / zoom is done by the GPU.
@@ -2311,7 +2361,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     setEngineBtn(); kick();
   }
   let start = null, looping = false, powered = false, lastTs = 0;
-  let redK = 0, logoT = 0, logoMoving = false, perfMs = 0, perfShown = 0;
+  let redK = 0, logoT = 0, logoMoving = false, perfMs = 0, perfShown = 0, fpsN = 0;
   // ================= Live data (OBD2) =================
   // The Qt build reads obd/reader.py's output and calls feed() ~20x a second. With the cable in
   // ("live", "sim", or "noecu" when the ECU is silent) real data drives the cluster instead of the toy.
@@ -2372,7 +2422,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     currentAlert = updateAlerts(ts / 1000);
     if (currentAlert || ALERTS.some(a => a.active)) moving = true;
     const flashing = sportA > 0.01 && S.rpm >= REDLINE;
-    looping = intro || blending || flashing || moving || carAnimating() || logoMoving || chargeMoving || brakeMoving || (powered && sportA > 0.01);   // Sport: trace keeps scrolling
+    looping = intro || blending || flashing || moving || carAnimating() || secSettling || logoMoving || chargeMoving || brakeMoving || (powered && sportA > 0.01);   // Sport: trace keeps scrolling
     return looping;
   }
   function frame(ts) {
@@ -2380,10 +2430,14 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const t0 = performance.now();
     draw();
     perfMs = perfMs * 0.9 + (performance.now() - t0) * 0.1;
-    if (ts - perfShown > 500) { perfShown = ts; const el = document.getElementById("perf"); if (el) el.textContent = "Draw time: " + perfMs.toFixed(1) + " ms per frame"; }
+    fpsN++;
+    if (ts - perfShown > 500) {
+      const fps = perfShown ? Math.round(fpsN * 1000 / (ts - perfShown)) : 0; fpsN = 0; perfShown = ts;
+      const el = document.getElementById("perf"); if (el && fps) el.textContent = `Draw time: ${perfMs.toFixed(1)} ms per frame · ${fps} fps while animating`;
+    }
     if (looping) requestAnimationFrame(frame);
   }
-  function kick() { if (!looping) { looping = true; lastTs = 0; requestAnimationFrame(frame); } }
+  function kick() { if (!looping) { looping = true; lastTs = 0; perfShown = 0; fpsN = 0; requestAnimationFrame(frame); } }
   function setMode(m, instant) {
     if (!instant && m !== MODE.to) carMove(MODE.to, m); else if (instant) CAM.keys = null;
     MODE.from = instant ? m : MODE.to; MODE.to = m;
@@ -2404,7 +2458,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   window.addEventListener("resize", () => { fitCanvas(); draw(); });
   if (document.fonts) {
     const faces = Object.values(NUMFONTS).flatMap(f => [f.dial, f.hub].map(w => `${w} 40px ${f.family}`));
-    Promise.all(faces.map(f => document.fonts.load(f).catch(() => {}))).then(draw);
+    Promise.all(faces.map(f => document.fonts.load(f).catch(() => {}))).then(() => { resetCaches(); draw(); });
   }
   looping = true; requestAnimationFrame(frame);
   document.getElementById("keyBtn").addEventListener("click", replay);

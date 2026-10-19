@@ -46,6 +46,26 @@ Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing c
   - Power-on: the car spins in with the dash (`T.car`).
 - **Ground:** clipped to the right panel, and stops short of the rings.
 
+**Speed on phones (2026-10-19, same idea as the Rock64 sections):**
+- **Sections are cached:** each section with a box is drawn into its own small canvas and only copied each frame, once its inputs have held still for 4 frames (`SETTLE`). Sections that change every frame (a needle while revving) are just drawn, because caching them would cost more.
+- **Bloom is baked, not per frame:** it goes into the static parts (gauge faces, chrome layers) once they settle. There's no per-frame bloom any more.
+- **The 3D car:**
+  - the road and the body are cached separately;
+  - the body only redraws when the pose, the brakes, the heat, the turn signals or the body pitch change (pitch in 0.23° steps);
+  - spokes are drawn only below 20 km/h, with a rim blur above;
+  - back faces are skipped before projecting.
+- **Canvas:** opaque (`alpha: false`), and capped at 1280×480 pixels (`MAX_SCALE` 1).
+- **Test switches** in the address: `?scale=1.5`, `?bloom=0`, `?cache=0`, `?glow=cheap`, `?car3d=0`.
+- **Measured on a desktop pretending to be a slow phone** (4× slower CPU, software graphics), with live OBD-style data at 20 Hz:
+
+  | Mode | Before (fps) | After (fps) |
+  |---|---|---|
+  | Normal | 10 | 22 |
+  | Eco | 11 | 21 |
+  | Sport | 14 | 40 |
+
+  Those "after" numbers were measured at 1.25× resolution, before the cap dropped to 1.
+
 **Trip info:** shown in Eco only. Normal's left panel is now just the speedometer.
 
 **Glow:** `glowStroke()` uses a real blur (`shadowBlur`); `GLOW_CHEAP` brings back the Rock64 three-stroke version. The needles glow too. A **bloom** pass at the end of `draw()` adds a blurred copy of the bright parts back on top (`BLOOM.amount`, 0.42): a quarter-size canvas with a contrast threshold, then blurred. That's about two image copies a frame. Draw time in desktop Chrome is about 3 ms a frame.

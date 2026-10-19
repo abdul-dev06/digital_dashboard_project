@@ -132,7 +132,7 @@
     }
     // wheels: tyre tread + outer face (the rim and spokes are drawn on it)
     const wheels = [];
-    const N = 16, tyreW = 0.2;
+    const N = 12, tyreW = 0.2;
     for (const za of [zf, zr]) for (const side of [1, -1]) {
       const xo = side * (b.track / 2 + tyreW / 2), xi = side * (b.track / 2 - tyreW / 2);
       const ringAt = x => Array.from({ length: N }, (_, k) => { const t = k / N * Math.PI * 2; return [x, r + Math.sin(t) * r, za + Math.cos(t) * r]; });
@@ -251,14 +251,15 @@
     const camPos = cam.pos;
     const items = [];
     for (const f of M.faces) {
+      const vx = camPos[0] - f.c[0], vy = camPos[1] - f.c[1], vz = camPos[2] - f.c[2];
+      const it_facing = (f.n[0] * vx + f.n[1] * vy + f.n[2] * vz) / (Math.hypot(vx, vy, vz) || 1);
+      if (it_facing <= 0) continue;                    // back faces: skipped before any projecting
       const body = f.kind !== "tyre" && f.kind !== "wheel";
       const pts = body ? f.pts.map(bodyPt) : f.pts;
       const proj = []; let behind = false, depth = 0;
       for (const p of pts) { const q = cam.project(p); if (q[2] < 0.25) { behind = true; break; } proj.push(q); depth += q[2]; }
       if (behind) continue;
-      const vx = camPos[0] - f.c[0], vy = camPos[1] - f.c[1], vz = camPos[2] - f.c[2];
-      const facing = (f.n[0] * vx + f.n[1] * vy + f.n[2] * vz) / (Math.hypot(vx, vy, vz) || 1);
-      items.push({ f, proj, depth: depth / proj.length, facing });
+      items.push({ f, proj, depth: depth / proj.length, facing: it_facing });
     }
     items.sort((p, q) => q.depth - p.depth);
     const line = s.line, dark = "#0a0e13";
@@ -268,10 +269,7 @@
       ctx.beginPath(); ctx.moveTo(proj[0][0], proj[0][1]);
       for (let i = 1; i < proj.length; i++) ctx.lineTo(proj[i][0], proj[i][1]);
       ctx.closePath();
-      if (facing <= 0) {                               // far side: only a faint line shows through
-        if (f.kind !== "tyre") { ctx.strokeStyle = rgba(line, 0.10); ctx.lineWidth = 0.8; ctx.stroke(); }
-        continue;
-      }
+      if (facing <= 0) continue;                       // far side: hidden behind the near side
       const lam = Math.max(0, f.n[0] * LIGHT[0] + f.n[1] * LIGHT[1] + f.n[2] * LIGHT[2]);
       let fill, edge = rgba(line, 0.35 + 0.5 * facing), lw = 1;
       switch (f.kind) {
@@ -288,7 +286,7 @@
       }
       ctx.fillStyle = fill; ctx.fill();
       ctx.strokeStyle = edge; ctx.lineWidth = lw; ctx.stroke();
-      if (f.kind === "wheel") drawRim(ctx, cam, f.wheel, s.wheelTurn || 0, line);
+      if (f.kind === "wheel") drawRim(ctx, cam, f.wheel, s.wheelTurn || 0, line, s.spokes !== false);
     }
     // indicators: amber at the corners while blinking
     if (s.turnL || s.turnR) {
@@ -306,15 +304,20 @@
     }
     ctx.restore();
   }
-  function drawRim(ctx, cam, w, turn, line) {
+  function drawRim(ctx, cam, w, turn, line, spokes) {
     const pt = (rho, t) => cam.project([w.x, w.r + Math.sin(t) * rho, w.za + Math.cos(t) * rho]);
     ctx.beginPath();
     for (let k = 0; k <= 20; k++) { const q = pt(w.r * 0.66, k / 20 * Math.PI * 2); if (k) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }
-    for (let k = 0; k < 5; k++) {
+    if (spokes) for (let k = 0; k < 5; k++) {
       const t = turn + k / 5 * Math.PI * 2, a = pt(w.r * 0.14, t), b = pt(w.r * 0.64, t);
       ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
     }
     ctx.strokeStyle = rgba(line, 0.8); ctx.lineWidth = 1; ctx.stroke();
+    if (!spokes) {                                     // spinning fast: a soft blur where the spokes would be
+      ctx.beginPath();
+      for (let k = 0; k <= 20; k++) { const q = pt(w.r * 0.4, k / 20 * Math.PI * 2); if (k) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }
+      ctx.strokeStyle = rgba(line, 0.25); ctx.lineWidth = Math.max(2, 4); ctx.stroke();
+    }
   }
 
   root.Car3D = { build, render, camera, STYLES };
