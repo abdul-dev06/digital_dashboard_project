@@ -1589,9 +1589,22 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     if (!CAM.keys) return restPose(MODE.to);
     const p = Math.min(1, (now - CAM.t0) / CAM.dur), K = CAM.keys;
     if (p >= 1) { CAM.keys = null; return restPose(MODE.to); }
-    let i = 1; while (i < K.length - 1 && p > K[i].at) i++;
-    const a = K[i - 1], b = K[i], k = easeInOut(Math.max(0, Math.min(1, (p - a.at) / (b.at - a.at))));
-    return lerpPose(a.pose, b.pose, k);
+    // one ease over the whole move, and a smooth curve through the keyframes (Catmull-Rom), so the
+    // car never stops at a keyframe: easing each leg on its own made it halt halfway.
+    const q = easeInOut(p);
+    let i = 1; while (i < K.length - 1 && q > K[i].at) i++;
+    const a = K[i - 1], b = K[i], u = Math.max(0, Math.min(1, (q - a.at) / (b.at - a.at)));
+    const p0 = (K[i - 2] || a).pose, p3 = (K[i + 1] || b).pose, o = {};
+    for (const key in a.pose) {
+      const y0 = p0[key], y1 = a.pose[key], y2 = b.pose[key], y3 = p3[key];
+      // tangents scaled by each leg's share of the move, so legs of different lengths join smoothly
+      const d1 = (K[i - 2] ? (y2 - y0) / (b.at - K[i - 2].at) : (y2 - y1) / (b.at - a.at)) * (b.at - a.at);
+      const d2 = (K[i + 1] ? (y3 - y1) / (K[i + 1].at - a.at) : (y2 - y1) / (b.at - a.at)) * (b.at - a.at);
+      const u2 = u * u, u3 = u2 * u;
+      o[key] = (2 * u3 - 3 * u2 + 1) * y1 + (u3 - 2 * u2 + u) * d1 + (-2 * u3 + 3 * u2) * y2 + (u3 - u2) * d2;
+    }
+    o.a = Math.max(0, Math.min(1, o.a)); o.ground = Math.max(0, Math.min(1, o.ground));
+    return o;
   }
   // nearest yaw to `from` that equals `to` (mod 360), plus `turns` extra full turns in direction dir
   const yawFrom = (from, to, turns = 0, dir = 1) => {
