@@ -236,7 +236,12 @@ Also available but unused: absolute load (43), relative throttle (45), barometri
 - **Using it:** the page has a **Connect OpenPort** button. Once Chrome has been allowed to use the cable, the page connects by itself (`getDevices()` and the `connect` event). The status line shows live, noecu or demo, plus readings per second and rpm. States go to `window.clusterFeed()` → `feed()`, the same path the Qt build uses.
 - **Hosting:** WebUSB needs HTTPS, so the page is served from GitHub Pages: `https://abdul-dev06.github.io/digital_dashboard_project/web/`. Pages has to be enabled in the repo settings: Pages → Deploy from branch `main` / root.
 - **Tested** with `tools/test_openport_js.mjs` against `obd/fake_openport.py`: about 115 replies/s, the one-PID-at-a-time fallback, and the silent ECU. Fake live states fed into the page drive the gauges.
-- **Not yet tested:** a real phone and cable. Planned first try: Abdul's Pixel.
+- **First Pixel try (2026-10-19):** Chrome connected to the cable and showed noecu ("car not answering"), and the orange OBD-link lamp flashed. The lamp lights only when the feed drops back to demo after the cable worked, so flashing means the connection kept dropping and reconnecting (the USB `connect` event restarts it). Possible causes: the cable resetting (power over OTG), or USB reads failing. Not known yet.
+- **Diagnostics on the page:** under the status line, a log box shows the last 14 events:
+  - USB plug and unplug, the interfaces claimed, the cable version, and mode changes;
+  - every 5 s: requests sent, `aro` acks, ECU replies, received frames by channel and status, odd replies (`are …`), bytes in, and battery voltage;
+  - why polling stopped.
+  Battery voltage is also on the status line, which proves the cable sees the car's 12 V. A stalled IN endpoint is cleared (`clearHalt`) instead of ending the session.
 - **Note:** the CarPlay screen in the car (board "T88", Android 10, WebView 149) blocks app installs, including from Play, and Android WebView has no WebUSB. So it can only show the page if the data comes from elsewhere, over Wi-Fi.
 
 ### Reading the car: Tactrix OpenPort 2.0 (`obd/reader.py`)

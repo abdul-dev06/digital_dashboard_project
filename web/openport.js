@@ -54,6 +54,8 @@
     constructor(transport) {
       this.t = transport; this.buf = new Uint8Array(0); this.seq = 10;
       this.lines = []; this.frames = []; this.waiters = []; this.closed = false;
+      // counters for the on-page diagnostics: what went out, what came back
+      this.stats = { sent: 0, aro: 0, odd: {}, rx: 0, frames: {}, ecu: 0 };
       this._pump();
     }
     async _pump() {
@@ -61,6 +63,7 @@
         let chunk;
         try { chunk = await this.t.read(); } catch (e) { this.closed = true; this.error = e; break; }
         if (!chunk || !chunk.length) continue;
+        this.stats.rx += chunk.length;
         const b = new Uint8Array(this.buf.length + chunk.length); b.set(this.buf); b.set(chunk, this.buf.length); this.buf = b;
         this._parse();
         const w = this.waiters; this.waiters = []; w.forEach(f => f());
@@ -79,7 +82,10 @@
           const n = this.buf[3];
           if (this.buf.length < 4 + n) return;
           const body = this.buf.slice(4, 4 + n); this.buf = this.buf.slice(4 + n);
-          if (body.length >= 5) this.frames.push({ ch: c - 0x30, status: body[0], payload: body.slice(5) });
+          if (body.length >= 5) {
+            this.frames.push({ ch: c - 0x30, status: body[0], payload: body.slice(5) });
+            const k = `ch${c - 0x30}/${body[0].toString(16)}`; this.stats.frames[k] = (this.stats.frames[k] || 0) + 1;
+          }
         } else {                                                // text reply up to \r\n
           let j = -1;
           for (let k = 0; k + 1 < this.buf.length; k++) if (this.buf[k] === 13 && this.buf[k + 1] === 10) { j = k; break; }
@@ -127,15 +133,17 @@
     async request(data) {
       this.frames = [];
       const msg = new Uint8Array(4 + data.length); new DataView(msg.buffer).setUint32(0, REQ_ID); msg.set(data, 4);
+      this.stats.sent++;
       const r = await this.cmd(`att${CH} ${msg.length} ${PAD} 100000`, msg, 300);
-      if (!r || !r.startsWith("aro")) return null;
+      if (!r || !r.startsWith("aro")) { const k = r ? r.split(/\s+/).slice(0, 2).join(" ") : "no reply"; this.stats.odd[k] = (this.stats.odd[k] || 0) + 1; return null; }
+      this.stats.aro++;
       const end = Date.now() + REPLY_TIMEOUT;
       while (Date.now() < end && !this.closed) {
         for (const f of this.frames) {
           // 0x40 = end of a received message; 0x10 = our transmit indication; 0x20 = loopback
           if (f.ch === CH && (f.status & 0x40) && !(f.status & 0x30) && f.payload.length > 4) {
             const id = new DataView(f.payload.buffer, f.payload.byteOffset).getUint32(0);
-            if (id === RESP_ID) return f.payload.slice(4);
+            if (id === RESP_ID) { this.stats.ecu++; return f.payload.slice(4); }
           }
         }
         this.frames = [];
@@ -186,15 +194,23 @@
         }
       }
       if (Date.now() - lastEcu > 2000 && state.mode !== "noecu") { state.mode = "noecu"; emit(); }
-      if (Date.now() - tRate > 5000) { state.rate = Math.round(polls / ((Date.now() - tRate) / 1000)); log(`${state.rate} replies/s, ${state.mode}`); polls = 0; tRate = Date.now(); emit(); }
+      if (Date.now() - tRate > 5000) {
+        state.rate = Math.round(polls / ((Date.now() - tRate) / 1000));
+        const st = port.stats, fr = Object.entries(st.frames).map(([k, n]) => `${k}:${n}`).join(" ") || "none",
+              odd = Object.entries(st.odd).map(([k, n]) => `${k}:${n}`).join(" ");
+        log(`${state.mode} · ${state.rate}/s · battery ${state.batteryVolts ?? "?"} V · requests ${st.sent}, cable ok ${st.aro}, ECU replies ${st.ecu} · frames ${fr}` + (odd ? ` · odd replies ${odd}` : "") + ` · ${st.rx} bytes in`);
+        port.stats = { sent: 0, aro: 0, odd: {}, rx: 0, frames: {}, ecu: 0 };
+        polls = 0; tRate = Date.now(); emit();
+      }
       if (state.mode === "noecu") { emit(); await new Promise(r => setTimeout(r, 200)); }
     }
+    log("stopped: " + (port.error ? "USB read failed: " + (port.error.message || port.error) : "closed"));
     state.mode = "demo"; emit();
   }
 
   // ---- WebUSB transport (browser) ----
   const USB_FILTER = { vendorId: 0x0403, productId: 0xcc4d };   // Tactrix OpenPort 2.0
-  async function usbTransport(dev) {
+  async function usbTransport(dev, log = () => {}) {
     await dev.open();
     if (!dev.configuration) await dev.selectConfiguration(1);
     let dataIf = null, epIn = null, epOut = null;
@@ -206,11 +222,17 @@
       }
     }
     if (dataIf === null) throw new Error("no data interface on the cable");
-    try { await dev.claimInterface(0); await dev.controlTransferOut({ requestType: "class", recipient: "interface", request: 0x22, value: 1, index: 0 }); } catch (e) {}
+    try { await dev.claimInterface(0); await dev.controlTransferOut({ requestType: "class", recipient: "interface", request: 0x22, value: 1, index: 0 }); }
+    catch (e) { log("serial setup skipped: " + (e.message || e)); }
     await dev.claimInterface(dataIf);
+    log(`USB: ${dev.productName || "cable"} · data interface ${dataIf} · in ${epIn} out ${epOut}`);
     return {
       async write(data) { for (let k = 0; k < data.length; k += 64) await dev.transferOut(epOut, data.slice(k, k + 64)); },
-      async read() { const r = await dev.transferIn(epIn, 64); return r.data ? new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength) : new Uint8Array(0); },
+      async read() {
+        const r = await dev.transferIn(epIn, 64);
+        if (r.status === "stall") { await dev.clearHalt("in", epIn); return new Uint8Array(0); }
+        return r.data ? new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength) : new Uint8Array(0);
+      },
       async close() { try { await dev.close(); } catch (e) {} },
     };
   }
@@ -220,7 +242,7 @@
     let dev = (await navigator.usb.getDevices()).find(d => d.vendorId === USB_FILTER.vendorId && d.productId === USB_FILTER.productId);
     if (!dev && ask) dev = await navigator.usb.requestDevice({ filters: [USB_FILTER] });
     if (!dev) return false;
-    const t = await usbTransport(dev), port = new OpenPort(t);
+    const t = await usbTransport(dev, log), port = new OpenPort(t);
     try { await poll(port, onState, log); } finally { await t.close(); }
     return true;
   }

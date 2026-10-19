@@ -2635,17 +2635,30 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const show = m => {
       let t = "Car data: " + (label[m.mode] || m.mode);
       if (m.mode === "live") t += (m.rate ? ` · ${m.rate} readings/s` : "") + (m.rpm !== undefined ? ` · ${Math.round(m.rpm)} rpm` : "");
+      if (m.batteryVolts !== undefined) t += ` · battery ${m.batteryVolts.toFixed(1)} V`;
       st.textContent = t;
+      if (m.mode !== lastMode) { lastMode = m.mode; note("mode: " + m.mode); }
+    };
+    // diagnostics on the page (a phone has no console): the last lines of what the cable did
+    const box = document.getElementById("obdLog"), lines = [];
+    let lastMode = null;
+    const note = msg => {
+      const d = new Date(), ts = d.toTimeString().slice(0, 8);
+      lines.push(ts + "  " + msg); if (lines.length > 14) lines.shift();
+      if (box) { box.hidden = false; box.textContent = lines.join("\n"); }
+      console.log("OpenPort:", msg);
     };
     async function go(ask) {
       if (busy) return; busy = true; btn.disabled = true;
       st.textContent = "Car data: connecting…";
       try {
-        const ok = await OpenPortOBD.connect(m => { show(m); window.clusterFeed(m); }, msg => console.log("OpenPort:", msg), ask);
-        if (!ok) st.textContent = "Car data: demo (keyboard and buttons)";
+        lastMode = null; note(ask ? "connect (button)" : "connect (automatic)");
+        const ok = await OpenPortOBD.connect(m => { show(m); window.clusterFeed(m); }, note, ask);
+        if (!ok) { st.textContent = "Car data: demo (keyboard and buttons)"; note("no cable allowed yet: tap Connect"); }
         else { st.textContent = "Car data: cable disconnected"; window.clusterFeed({ mode: "demo" }); }
       } catch (e) {
         st.textContent = "Car data: " + (e && e.message ? e.message : e);
+        note("error: " + (e && e.message ? e.message : e));
         window.clusterFeed({ mode: "demo" });
       }
       busy = false; btn.disabled = false;
@@ -2653,7 +2666,8 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     btn.addEventListener("click", () => go(true));
     if ("usb" in navigator) {
       go(false);                                                // a cable allowed before: connect without asking
-      navigator.usb.addEventListener("connect", () => go(false));
+      navigator.usb.addEventListener("connect", () => { note("USB: cable plugged in"); go(false); });
+      navigator.usb.addEventListener("disconnect", () => note("USB: cable unplugged (or it reset)"));
     } else btn.title = "Needs Chrome (WebUSB)";
   })();
 })();
