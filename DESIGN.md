@@ -66,6 +66,20 @@ Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing c
 
   Those "after" numbers were measured at 1.25× resolution, before the cap dropped to 1.
 
+**Full screen (2026-10-19):** the page is now just the dashboard, letterboxed to 1280:480 on a black screen. The controls are on the dash's bottom strip:
+
+| Control | Where | What it does |
+|---|---|---|
+| Mode pill | left of the clock | tap for the next mode (Eco → Normal → Sport) |
+| Connect chip | right of the clock | tap to connect the OpenPort. It shows CONNECT CAR, CONNECTING, LIVE · n/S, CAR OFF, RETRY or NEEDS CHROME; the dot pulses while connecting or while the car is off (`OBDUI`, `setObdUi`) |
+| Gear | after the left lamps | opens the **Settings** sheet: car profile, logo and chime uploads, mode buttons, connection status and log, demo key/engine/drive/test buttons, draw time |
+
+- **Phone behaviour:** the first tap on a phone or tablet goes full screen and locks to landscape. A wake lock keeps the screen on.
+- **Install:** `manifest.json` (fullscreen, landscape) and icons, so "Add to Home screen" gives a full-screen app.
+- **Keyboard:** S opens Settings, Esc closes it; the other keys are unchanged.
+- **Page head:** the page now has a doctype, charset and viewport.
+- **Logo:** the Hyundai profiles use `assets/hyundai/logo.png` (supplied, already transparent) for both the main and the redline logo. The BMW/M files stay in `assets/` for the frozen Rock64 build.
+
 **Trip info:** shown in Eco only. Normal's left panel is now just the speedometer.
 
 **Glow:** `glowStroke()` uses a real blur (`shadowBlur`); `GLOW_CHEAP` brings back the Rock64 three-stroke version. The needles glow too. A **bloom** pass at the end of `draw()` adds a blurred copy of the bright parts back on top (`BLOOM.amount`, 0.42): a quarter-size canvas with a contrast threshold, then blurred. That's about two image copies a frame. Draw time in desktop Chrome is about 3 ms a frame.

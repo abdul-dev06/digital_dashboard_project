@@ -16,8 +16,8 @@ window.CAR_PROFILES = [
   {
     id: "elantra-2007",
     name: "2007 Hyundai Elantra",
-    logo: "../assets/logo.png",
-    logoRedline: "../assets/logo-redline.png",
+    logo: "../assets/hyundai/logo.png",
+    logoRedline: "../assets/hyundai/logo.png",
     sounds: { start: "../assets/start.mp3", alert: "../assets/alert.mp3" },
     engine: { redline: 6500, idle: 760, speedMax: 220, tankLitres: 55 },
     body: { style: "sedan", length: 4.505, width: 1.775, height: 1.48, wheelbase: 2.65,
@@ -26,7 +26,7 @@ window.CAR_PROFILES = [
   {
     id: "tucson-2017",
     name: "2017 Hyundai Tucson",
-    logo: null, logoRedline: null,
+    logo: "../assets/hyundai/logo.png", logoRedline: "../assets/hyundai/logo.png",
     sounds: { start: null, alert: null },
     engine: { redline: 6500, idle: 700, speedMax: 220, tankLitres: 62 },
     body: { style: "suv", length: 4.475, width: 1.85, height: 1.65, wheelbase: 2.67,

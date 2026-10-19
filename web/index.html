@@ -1,4 +1,11 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Elantra Cluster</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Quicksand:wght@400;500;600&family=Michroma&display=swap">
@@ -57,6 +64,19 @@ button[aria-pressed="true"] { border-color: #3d8bff; color: #8fbcff; }
 .drive { gap: 10px; }
 .tests button { font-size: 12px; padding: 7px 12px; }
 .tests button[aria-pressed="true"] { border-color: #ffb020; color: #ffc65a; }
+/* Full screen: the dashboard fills the screen (letterboxed to 1280:480); settings slide over it. */
+html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+body { display: flex; align-items: center; justify-content: center; height: 100dvh; padding: 0;
+  padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+.wrap { max-width: none; width: min(100vw, calc(100dvh * 1280 / 480)); gap: 0; margin: 0; }
+.screen { border: 0; border-radius: 0; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.sheet { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 94vw); overflow-y: auto; z-index: 10;
+  background: rgba(7, 9, 12, 0.96); border-left: 1px solid var(--line); padding: 14px 16px 24px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 12px; }
+.sheet[hidden] { display: none; }
+.sheet h3 { margin: 6px 0 0; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.rotate { display: none; position: fixed; left: 0; right: 0; bottom: 18px; text-align: center; color: var(--muted); font-size: 13px; margin: 0; }
 /* Kiosk view (add ?kiosk to the address): only the cluster, filling the screen, no cursor. Used on the Rock64. */
 html.kiosk body { margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; cursor: none; overflow: hidden; background: #000; }
 html.kiosk .wrap { max-width: none; width: min(100vw, calc(100vh * 1280 / 480)); gap: 0; }
@@ -77,60 +97,71 @@ html.kiosk .screen { border: 0; border-radius: 0; }
   background: linear-gradient(#141a21, #0c1015);
 }
 .gas.on { border-color: #ff5060; color: #ff7a85; box-shadow: 0 0 18px rgba(255,80,96,0.25) inset; }
-@media (orientation: portrait) and (max-width: 700px) { .rotate { display: block; } }
-.rotate { display: none; }
+@media (orientation: portrait) and (max-width: 900px) { .rotate { display: block; } }
 </style>
 
 <div class="wrap">
-  <div class="screen"><canvas id="cluster" width="1280" height="480" aria-label="Simulated Elantra instrument cluster"></canvas></div>
-  <div class="controls">
-    <button id="keyBtn" type="button">Key on</button>
-    <button id="engBtn" type="button">Start engine</button>
-    <label class="filebtn sel">Car
-      <select id="carSel" aria-label="Car profile"></select>
-    </label>
-    <label class="filebtn" for="logoIn">Use my logo
-      <input id="logoIn" type="file" accept="image/*">
-    </label>
-    <label class="filebtn" for="logoRedIn">Redline logo
-      <input id="logoRedIn" type="file" accept="image/*">
-    </label>
-    <label class="filebtn" for="sndStartIn">Startup sound
-      <input id="sndStartIn" type="file" accept="audio/*">
-    </label>
-    <label class="filebtn" for="sndAlertIn">Alert sound
-      <input id="sndAlertIn" type="file" accept="audio/*">
-    </label>
-    <span class="seg" role="group" aria-label="Drive mode">
-      <button type="button" data-mode="eco" aria-pressed="false">Eco</button>
-      <button type="button" data-mode="normal" aria-pressed="true">Normal</button>
-      <button type="button" data-mode="sport" aria-pressed="false">Sport</button>
-    </span>
+  <div class="screen"><canvas id="cluster" width="1280" height="480" aria-label="Instrument cluster. Tap the mode pill to change mode, Connect to read the car, the gear for settings."></canvas></div>
+  <p class="rotate">Turn your phone sideways</p>
+  <!-- Settings: opened with the gear on the dash (or the S key). Everything that used to sit under the dash. -->
+  <div id="sheet" class="sheet" hidden role="dialog" aria-label="Settings">
+    <div class="sheet-head"><strong>Settings</strong><button id="sheetClose" type="button">Done</button></div>
+    <div class="controls">
+      <label class="filebtn sel">Car
+        <select id="carSel" aria-label="Car profile"></select>
+      </label>
+    </div>
+    <div class="controls">
+      <label class="filebtn" for="logoIn">Logo
+        <input id="logoIn" type="file" accept="image/*">
+      </label>
+      <label class="filebtn" for="logoRedIn">Redline logo
+        <input id="logoRedIn" type="file" accept="image/*">
+      </label>
+      <label class="filebtn" for="sndStartIn">Startup sound
+        <input id="sndStartIn" type="file" accept="audio/*">
+      </label>
+      <label class="filebtn" for="sndAlertIn">Alert sound
+        <input id="sndAlertIn" type="file" accept="audio/*">
+      </label>
+    </div>
+    <div class="controls">
+      <span class="seg" role="group" aria-label="Drive mode">
+        <button type="button" data-mode="eco" aria-pressed="false">Eco</button>
+        <button type="button" data-mode="normal" aria-pressed="true">Normal</button>
+        <button type="button" data-mode="sport" aria-pressed="false">Sport</button>
+      </span>
+    </div>
+    <h3>Car connection</h3>
+    <div class="controls obd" aria-label="Car connection">
+      <button id="obdBtn" type="button">Connect OpenPort</button>
+      <span id="obdStatus" class="note">Car data: demo</span>
+    </div>
+    <pre id="obdLog" class="obdlog" hidden></pre>
+    <h3>Demo (no car)</h3>
+    <div class="controls">
+      <button id="keyBtn" type="button">Key on</button>
+      <button id="engBtn" type="button">Start engine</button>
+    </div>
+    <div class="controls drive" aria-label="Test drive">
+      <button id="downBtn" type="button" class="shift">− Down</button>
+      <output id="gearOut" class="gear" aria-live="polite">N</output>
+      <button id="upBtn" type="button" class="shift">Up +</button>
+      <button id="gasBtn" type="button" class="gas">Hold to rev</button>
+      <span id="driveMsg" class="note"></span>
+    </div>
+    <div class="controls tests" aria-label="Test actions">
+      <button type="button" id="tCold">Cold start</button>
+      <button type="button" id="tHot" aria-pressed="false">Overheat</button>
+      <button type="button" id="tCel" aria-pressed="false">Check engine</button>
+      <button type="button" id="tFill">Filled up</button>
+      <button type="button" id="tIce" aria-pressed="false">Icy outside</button>
+      <button type="button" id="tLink" aria-pressed="false">OBD lost</button>
+    </div>
+    <p class="note" id="perf"></p>
+    <p class="note">On a keyboard: Space revs, arrows shift, 1/2/3 modes, K key on, E engine, S settings.
+      Add the page to your home screen for a full-screen app that stays in landscape.</p>
   </div>
-  <div class="controls obd" aria-label="Car connection">
-    <button id="obdBtn" type="button">Connect OpenPort</button>
-    <span id="obdStatus" class="note">Car data: demo (keyboard and buttons)</span>
-  </div>
-  <pre id="obdLog" class="obdlog" hidden></pre>
-  <div class="controls drive" aria-label="Test drive">
-    <button id="downBtn" type="button" class="shift">− Down</button>
-    <output id="gearOut" class="gear" aria-live="polite">N</output>
-    <button id="upBtn" type="button" class="shift">Up +</button>
-    <button id="gasBtn" type="button" class="gas">Hold to rev</button>
-    <span id="driveMsg" class="note"></span>
-  </div>
-  <p class="note rotate">Turn your phone sideways for a bigger view.</p>
-  <div class="controls tests" aria-label="Test actions">
-    <span class="note">Tests</span>
-    <button type="button" id="tCold">Cold start</button>
-    <button type="button" id="tHot" aria-pressed="false">Overheat</button>
-    <button type="button" id="tCel" aria-pressed="false">Check engine</button>
-    <button type="button" id="tFill">Filled up</button>
-    <button type="button" id="tIce" aria-pressed="false">Icy outside</button>
-    <button type="button" id="tLink" aria-pressed="false">OBD lost</button>
-  </div>
-  <p class="note" id="perf"></p>
-  <p class="note">Test drive: hold the rev button (or Space), shift with the buttons or the arrow keys. It is a toy 5-speed manual just for feel; the real car will feed rpm and speed over OBD2.</p>
 </div>
 
 <script src="openport.js"></script>
@@ -2178,9 +2209,42 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       const clock = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
       text(clock, DCX, BB - 6, 24, "#e8ecf0", { align: "center", base: "alphabetic" });   // big, may rise above the strip
       text(Math.round(S.outsideTemp) + "°C", DCX + 52, BB - 9, 13, "#9aa6b2", { base: "alphabetic" });
+      drawStripUI(by);
     });
 
     drawTop();
+  }
+  // ---- touch controls on the dash itself (the page has nothing else on it) ----
+  //   mode pill      tap: next mode (Eco -> Normal -> Sport)
+  //   car chip       tap: connect the OpenPort; shows the link state (right of the clock)
+  //   gear           tap: settings (car profile, logos, chimes, demo controls, connection log)
+  const OBDUI = { state: "demo", rate: 0 };            // demo | connecting | live | noecu | error | nousb
+  const HIT = { mode: [DCX - 150, BT + 9], chip: [DCX + 215, BT + 9], gear: [214, BT + 14] };
+  function drawStripUI(by) {
+    const st = OBDUI.state, now = performance.now() / 1000;
+    const info = {
+      demo: ["CONNECT CAR", "#7d8996"], connecting: ["CONNECTING", "#ffb020"], live: ["LIVE" + (OBDUI.rate ? " · " + OBDUI.rate + "/S" : ""), "#38e07b"],
+      noecu: ["CAR OFF", "#ffb020"], error: ["RETRY", "#ff3b4e"], nousb: ["NEEDS CHROME", "#5d6873"],
+    }[st] || ["CONNECT CAR", "#7d8996"];
+    const [label, col] = info, cx = HIT.chip[0];
+    const w = measure(label, 9, 700, 2.2) + 40;
+    rrect(cx - w / 2, by, w, 18, 9);
+    ctx.fillStyle = rgba(col, 0.10); ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = rgba(col, 0.9); ctx.stroke();
+    const pulse = st === "connecting" || st === "noecu" ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(now * 5)) : 1;
+    ctx.beginPath(); ctx.arc(cx - w / 2 + 13, by + 9, 3.2, 0, Math.PI * 2); ctx.fillStyle = rgba(col, pulse); ctx.fill();
+    text(label, cx + 6, by + 9.5, 9, col, { weight: 700, align: "center", base: "middle", ls: 2.2 });
+    // settings gear
+    const [gx, gy] = HIT.gear, R = 7;
+    ctx.save(); ctx.translate(gx, gy); ctx.beginPath();
+    for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, r = i % 2 ? R : R + 2.4; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+    ctx.closePath(); ctx.moveTo(3, 0); ctx.arc(0, 0, 3, 0, Math.PI * 2, true);
+    ctx.fillStyle = "#4a5560"; ctx.fill("evenodd"); ctx.restore();
+  }
+  const obdAnimating = () => OBDUI.state === "connecting" || OBDUI.state === "noecu";
+  function setObdUi(state, rate) {
+    const changed = state !== OBDUI.state || (rate || 0) !== OBDUI.rate;
+    OBDUI.state = state; OBDUI.rate = rate || 0;
+    if (changed) kick();
   }
   // Overlays above everything: the warning popup and the start-up logo. They are sections, so in Qt
   // each is drawn once and its fade / slide / zoom is done by the GPU.
@@ -2422,7 +2486,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     currentAlert = updateAlerts(ts / 1000);
     if (currentAlert || ALERTS.some(a => a.active)) moving = true;
     const flashing = sportA > 0.01 && S.rpm >= REDLINE;
-    looping = intro || blending || flashing || moving || carAnimating() || secSettling || logoMoving || chargeMoving || brakeMoving || (powered && sportA > 0.01);   // Sport: trace keeps scrolling
+    looping = intro || blending || flashing || moving || carAnimating() || secSettling || obdAnimating() || logoMoving || chargeMoving || brakeMoving || (powered && sportA > 0.01);   // Sport: trace keeps scrolling
     return looping;
   }
   function frame(ts) {
@@ -2531,6 +2595,34 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     }
   });
   window.addEventListener("keyup", e => { if (e.code === "Space") gas(false); });
+
+  // ---- full screen app: taps on the dash, full screen + landscape, screen kept on ----
+  let connectCar = () => {};
+  const sheet = document.getElementById("sheet");
+  const openSheet = on => { sheet.hidden = !on; };
+  document.getElementById("sheetClose").addEventListener("click", () => openSheet(false));
+  window.addEventListener("keydown", e => { if (e.code === "KeyS" && !e.repeat) openSheet(sheet.hidden); if (e.code === "Escape") openSheet(false); });
+  async function goFullscreen() {
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      if (screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape").catch(() => {});
+    } catch (e) {}
+  }
+  let wake = null;                                      // keep the screen on while the dash is showing
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator && !wake) { wake = await navigator.wakeLock.request("screen"); wake.addEventListener("release", () => { wake = null; }); } } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") keepAwake(); });
+  keepAwake();
+  cv.addEventListener("pointerdown", e => {
+    const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    const near = ([hx, hy], rx, ry) => Math.abs(x - hx) < rx && Math.abs(y - hy) < ry;
+    if (e.pointerType !== "mouse") goFullscreen();       // phones/tablets: first tap goes full screen
+    keepAwake();
+    if (near(HIT.mode, 80, 26)) { const order = ["eco", "normal", "sport"]; setMode(order[(order.indexOf(MODE.to) + 1) % 3]); }
+    else if (near(HIT.chip, 80, 26)) connectCar();
+    else if (near(HIT.gear, 30, 26)) openSheet(true);
+  });
   const WARM = { saved: null };
   if (typeof __exportCluster === "function") __exportCluster({
     step, draw, drawTop, topActive, speedOnTop: () => ecoA > 0.5,
@@ -2555,6 +2647,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     const label = { live: "live", noecu: "cable connected, car not answering (key off?)", demo: "demo", sim: "simulated" };
     let busy = false;
     const show = m => {
+      setObdUi(m.mode === "live" || m.mode === "noecu" ? m.mode : "demo", m.mode === "live" ? m.rate : 0);
       let t = "Car data: " + (label[m.mode] || m.mode);
       if (m.mode === "live") t += (m.rate ? ` · ${m.rate} readings/s` : "") + (m.rpm !== undefined ? ` · ${Math.round(m.rpm)} rpm` : "");
       if (m.batteryVolts !== undefined) t += ` · battery ${m.batteryVolts.toFixed(1)} V`;
@@ -2572,25 +2665,27 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     };
     async function go(ask) {
       if (busy) return; busy = true; btn.disabled = true;
-      st.textContent = "Car data: connecting…";
+      st.textContent = "Car data: connecting…"; if (ask) setObdUi("connecting");
       try {
         lastMode = null; note(ask ? "connect (button)" : "connect (automatic)");
         const ok = await OpenPortOBD.connect(m => { show(m); window.clusterFeed(m); }, note, ask);
-        if (!ok) { st.textContent = "Car data: demo (keyboard and buttons)"; note("no cable allowed yet: tap Connect"); }
-        else { st.textContent = "Car data: cable disconnected"; window.clusterFeed({ mode: "demo" }); }
+        if (!ok) { st.textContent = "Car data: demo (keyboard and buttons)"; note("no cable allowed yet: tap Connect"); setObdUi("demo"); }
+        else { st.textContent = "Car data: cable disconnected"; window.clusterFeed({ mode: "demo" }); setObdUi("demo"); }
       } catch (e) {
         st.textContent = "Car data: " + (e && e.message ? e.message : e);
         note("error: " + (e && e.message ? e.message : e));
+        setObdUi(e && e.name === "NotFoundError" ? "demo" : "error");          // NotFoundError: the picker was closed
         window.clusterFeed({ mode: "demo" });
       }
       busy = false; btn.disabled = false;
     }
     btn.addEventListener("click", () => go(true));
+    connectCar = () => { if ("usb" in navigator) go(true); else setObdUi("nousb"); };
     if ("usb" in navigator) {
       go(false);                                                // a cable allowed before: connect without asking
       navigator.usb.addEventListener("connect", () => { note("USB: cable plugged in"); go(false); });
       navigator.usb.addEventListener("disconnect", () => note("USB: cable unplugged (or it reset)"));
-    } else btn.title = "Needs Chrome (WebUSB)";
+    } else { btn.title = "Needs Chrome (WebUSB)"; setObdUi("nousb"); }
   })();
 })();
 </script>
