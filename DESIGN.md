@@ -35,12 +35,12 @@ Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing c
 
   | Mode | Where the car is | View |
   |---|---|---|
-  | Eco | right panel | from above and behind |
+  | Eco | right panel | its left side, from above (yaw −62°) |
   | Normal | right panel | chase view on the road, which replaces the old flat road and rear-view car |
   | Sport | hidden | the camera has dived into the engine |
 
 - **Moves:**
-  - Eco ↔ Normal: a full spin with a lift (1.3 s).
+  - Eco ↔ Normal: the camera simply turns the shortest way to the new angle (0.9 s); no extra spin. Mode changes no longer add a rev kick to the rpm reading.
   - Into Sport: the car flies to the middle, turns to face you (`hero`), then the camera dives through the hood into the engine drawing (`dive`) as the Sport layout arrives. `SPORT_SWITCH.dur` is now 1.3 s.
   - Out of Sport: the same move backwards.
   - Power-on: the car spins in with the dash (`T.car`).
@@ -183,9 +183,10 @@ Everything is drawn on one canvas in a fixed 1280×480 coordinate space, scaled 
   - **Cost:** only transforms + alpha on the cached chrome images. The Sport chrome is blitted as three clipped parts (left bracket / engine / right bracket; above `SW_TOP` the split is at screen centre so the bracket ends stay whole) and the Sport live layer is split the same way (`drawSportLeft/Middle/Right`). Measured worst ~2.6 ms per frame during a switch in the browser, ~0.5 ms steady. In Qt: draw the cached QImages with `QPainter::setClipRect` + `translate/scale` and `setOpacity`.
   - `withAlpha()` now multiplies the current alpha, so nested fades combine correctly.
 - **Alerts:** calm note card over everything: static triangle icon (red or amber), headline, body. Dims the dash slightly. Stays `alertSeconds` (7), plays the alert sound once (max every 4 s per alert). Priority order in `ALERTS`:
-  1. Engine overheating (coolant > operating + margin), red
+  1. Engine overheating (coolant over `hotAbove`, 100 °C), red
   2. Check engine, amber
-  3. Engine still cold (coolant < operating temp and rpm > coldRevFraction × redline), amber
+  3. Battery not charging
+  (The "engine still cold, keep the revs low" alert was removed 2026-10-19.)
 - **User uploads (web: kept in browser storage; Qt: files in `/opt/cluster/`):** main logo (`logo.png`), redline logo (`logo-redline.png`), startup sound, alert sound. Dark backgrounds are keyed out of logos automatically.
 
 ---
@@ -246,9 +247,8 @@ Theme colours per mode in `THEMES`; numeral fonts per mode in `NUMFONTS`.
 | afr | 14.7 | air/fuel ratio for fuel calc |
 | fuelDensity | 745 | g/L petrol |
 | defaultL100 | 8.6 | used for range until trip has an average |
-| operatingTemp | 88 | °C; cold below this |
-| overheatMargin | 5 | overheating above operatingTemp + this |
-| coldRevFraction | 0.55 | cold-rev warning above this fraction of redline |
+| coldBelow | 70 | °C; cold (warming up, blue lamp) below this |
+| hotAbove | 100 | °C; overheating above this |
 | alertSeconds | 7 | alert note duration |
 | roadPxPerKmh | 1.6 | top-view lane line speed |
 | traceSeconds | 24 | Sport rev trace history |
