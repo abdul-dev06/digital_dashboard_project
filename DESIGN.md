@@ -92,6 +92,7 @@ Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing c
   - a wide, flat spotlight pool on the ground under the gauges (42%);
   - a faint light from above (10%).
 - **How it works:** it's drawn into each mode's cached chrome, so it costs nothing per frame and cross-fades with the mode. The side panels are now see-through (72% → 45%) so the colour shows through them.
+- **The bottom strip is part of the same lit floor:** the colour and spotlight run down through it, and the old glowing divider line is now a soft horizon brightest in the middle. The mode pill and connect chip got a dark backing so they stay readable.
 
 **Trip info:** shown in Eco only. Normal's left panel is now just the speedometer.
 
