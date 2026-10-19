@@ -231,6 +231,14 @@ Also available but unused: absolute load (43), relative throttle (45), barometri
 - **Toy values (web only):** λ 0.86 under hard load else 1.00; timing rises with rpm; cat temps chase 360 + load×4 + rpm/18 (cat 2 lags, ~70° cooler).
 - **Shift detection (`detectShift`):** sample rpm + speed at `traceHz`. Ratio = rpm ÷ speed. A shift = ratio changes by more than `shiftStep` (18%) versus 0.6 s earlier, both samples above `shiftMinSpeed`, rpm above idle + 250, and the new ratio steady (±5%) for 0.2 s. Max one per second. Ratio drop = upshift, rise = downshift/kickdown. Needs ~10 Hz rpm+speed (CAN + USB adapter). Future: learn the 4 gear ratios over a few drives to label gears.
 
+### Reading the car in the browser (`web/openport.js`, 2026-10-19)
+- **What it is:** the same OpenPort protocol and polling plan as `obd/reader.py`, in JavaScript over **WebUSB** (Chrome on Android with a USB-C OTG adapter, or desktop Chrome). The browser dashboard reads the car directly, with no Rock64.
+- **Using it:** the page has a **Connect OpenPort** button. Once Chrome has been allowed to use the cable, the page connects by itself (`getDevices()` and the `connect` event). The status line shows live, noecu or demo, plus readings per second and rpm. States go to `window.clusterFeed()` → `feed()`, the same path the Qt build uses.
+- **Hosting:** WebUSB needs HTTPS, so the page is served from GitHub Pages: `https://abdul-dev06.github.io/digital_dashboard_project/web/`. Pages has to be enabled in the repo settings: Pages → Deploy from branch `main` / root.
+- **Tested** with `tools/test_openport_js.mjs` against `obd/fake_openport.py`: about 115 replies/s, the one-PID-at-a-time fallback, and the silent ECU. Fake live states fed into the page drive the gauges.
+- **Not yet tested:** a real phone and cable. Planned first try: Abdul's Pixel.
+- **Note:** the CarPlay screen in the car (board "T88", Android 10, WebView 149) blocks app installs, including from Play, and Android WebView has no WebUSB. So it can only show the page if the data comes from elsewhere, over Wi-Fi.
+
 ### Reading the car: Tactrix OpenPort 2.0 (`obd/reader.py`)
 - **Adapter:** Abdul's Tactrix OpenPort 2.0 (USB, J2534) replaces the ELM327 plan. On Linux it is a CDC-ACM serial device (`/dev/ttyACM0`, needs the `dialout` group) that takes text commands (`at<verb><ch> <args> <seq>`) plus binary payloads and answers `ar…` text replies and binary frames. It does ISO-TP itself. Protocol reference: github.com/bisak/openport-j2534 `docs/PROTOCOL.md`.
 - **The reader** is plain Python (standard library only):

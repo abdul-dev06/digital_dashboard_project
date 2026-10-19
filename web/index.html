@@ -100,6 +100,10 @@ html.kiosk .screen { border: 0; border-radius: 0; }
       <button type="button" data-mode="sport" aria-pressed="false">Sport</button>
     </span>
   </div>
+  <div class="controls obd" aria-label="Car connection">
+    <button id="obdBtn" type="button">Connect OpenPort</button>
+    <span id="obdStatus" class="note">Car data: demo (keyboard and buttons)</span>
+  </div>
   <div class="controls drive" aria-label="Test drive">
     <button id="downBtn" type="button" class="shift">− Down</button>
     <output id="gearOut" class="gear" aria-live="polite">N</output>
@@ -121,6 +125,7 @@ html.kiosk .screen { border: 0; border-radius: 0; }
   <p class="note">Test drive: hold the rev button (or Space), shift with the buttons or the arrow keys. It is a toy 5-speed manual just for feel; the real car will feed rpm and speed over OBD2.</p>
 </div>
 
+<script src="openport.js"></script>
 <script>
 if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add("kiosk");
 (() => {
@@ -2386,5 +2391,39 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     setCtx: c => { ctx = c; }, setLayered: v => { LAYERED = v; }, dash: () => A.dash, W, H
   });
   window.addEventListener("blur", () => gas(false));
+
+  // ---- live car data from a Tactrix OpenPort 2.0 over USB (Chrome, WebUSB): see openport.js ----
+  // Plug the cable into the phone/tablet (USB-C OTG adapter) and the car, then tap Connect.
+  // Once allowed, Chrome remembers the cable and the page connects to it by itself next time.
+  window.clusterFeed = m => { feed(m); kick(); };
+  (function () {
+    const btn = document.getElementById("obdBtn"), st = document.getElementById("obdStatus");
+    if (!btn || !window.OpenPortOBD) return;
+    const label = { live: "live", noecu: "cable connected, car not answering (key off?)", demo: "demo", sim: "simulated" };
+    let busy = false;
+    const show = m => {
+      let t = "Car data: " + (label[m.mode] || m.mode);
+      if (m.mode === "live") t += (m.rate ? ` · ${m.rate} readings/s` : "") + (m.rpm !== undefined ? ` · ${Math.round(m.rpm)} rpm` : "");
+      st.textContent = t;
+    };
+    async function go(ask) {
+      if (busy) return; busy = true; btn.disabled = true;
+      st.textContent = "Car data: connecting…";
+      try {
+        const ok = await OpenPortOBD.connect(m => { show(m); window.clusterFeed(m); }, msg => console.log("OpenPort:", msg), ask);
+        if (!ok) st.textContent = "Car data: demo (keyboard and buttons)";
+        else { st.textContent = "Car data: cable disconnected"; window.clusterFeed({ mode: "demo" }); }
+      } catch (e) {
+        st.textContent = "Car data: " + (e && e.message ? e.message : e);
+        window.clusterFeed({ mode: "demo" });
+      }
+      busy = false; btn.disabled = false;
+    }
+    btn.addEventListener("click", () => go(true));
+    if ("usb" in navigator) {
+      go(false);                                                // a cable allowed before: connect without asking
+      navigator.usb.addEventListener("connect", () => go(false));
+    } else btn.title = "Needs Chrome (WebUSB)";
+  })();
 })();
 </script>
