@@ -86,6 +86,13 @@ Choose a car with the **Car** picker on the page or with `?car=<id>`. Changing c
 - **Launch:** as soon as the speed rises, the wheel spins up with a burst of wheelspin (capped so the spokes don't strobe), the camera shakes briefly and pulls back, and the road scrolls. 1 s later it dives back into the engine (0.9 s).
 - **Cancel:** the revs leave the range for 1 s without a launch, or you leave Sport.
 
+**Mode-coloured ground (2026-10-19, `drawModeGround`, `GROUND`):** like a modern digital cluster (an F-150's, for example), the background above the strip is no longer black.
+- **What's drawn:**
+  - a wash of the mode's accent colour rising from the bottom (20%);
+  - a wide, flat spotlight pool on the ground under the gauges (42%);
+  - a faint light from above (10%).
+- **How it works:** it's drawn into each mode's cached chrome, so it costs nothing per frame and cross-fades with the mode. The side panels are now see-through (72% → 45%) so the colour shows through them.
+
 **Trip info:** shown in Eco only. Normal's left panel is now just the speedometer.
 
 **Glow:** `glowStroke()` uses a real blur (`shadowBlur`); `GLOW_CHEAP` brings back the Rock64 three-stroke version. The needles glow too. A **bloom** pass at the end of `draw()` adds a blurred copy of the bright parts back on top (`BLOOM.amount`, 0.42): a quarter-size canvas with a contrast threshold, then blurred. That's about two image copies a frame. Draw time in desktop Chrome is about 3 ms a frame.

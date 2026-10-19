@@ -445,7 +445,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
 
   function fillPanel(pathFn, top, bottom) {
     const g = ctx.createLinearGradient(0, top, 0, bottom);
-    g.addColorStop(0, TH.panelTop); g.addColorStop(1, "#07090c");
+    g.addColorStop(0, rgba(TH.panelTop, 0.72)); g.addColorStop(1, "rgba(7,9,12,0.45)");    // see-through: the mode's colour shows
     ctx.fillStyle = g; ctx.fill();
     ctx.lineWidth = 1.5; ctx.strokeStyle = "#1d252e"; ctx.stroke();
   }
@@ -1801,7 +1801,30 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
     bg.addColorStop(0, "#05070a"); bg.addColorStop(1, "#010203");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
   }
+  // Mode-coloured ground behind everything above the strip: the colour rises from the bottom like a
+  // lit floor, with a soft spotlight pool under the gauges (cached in each mode's chrome, so it
+  // cross-fades with the mode for free). GROUND tunes how strong it is.
+  const GROUND = { wash: 0.20, spot: 0.42, top: 0.05 };
+  function drawModeGround() {
+    const c = TH.accent, y1 = FLOOR.top;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, y1); ctx.clip();
+    const g = ctx.createLinearGradient(0, 0, 0, y1);
+    g.addColorStop(0, rgba(c, GROUND.top)); g.addColorStop(0.45, rgba(c, GROUND.top * 0.6)); g.addColorStop(1, rgba(c, GROUND.wash));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, y1);
+    // spotlight pool on the ground, wide and flat, centred under the dial
+    ctx.save(); ctx.translate(W / 2, y1 + 30); ctx.scale(1.9, 0.62);
+    const r = ctx.createRadialGradient(0, 0, 10, 0, 0, 420);
+    r.addColorStop(0, rgba(c, GROUND.spot)); r.addColorStop(0.35, rgba(c, GROUND.spot * 0.45)); r.addColorStop(1, rgba(c, 0));
+    ctx.fillStyle = r; ctx.beginPath(); ctx.arc(0, 0, 420, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // a faint light from above, so the top isn't flat black
+    const t = ctx.createRadialGradient(W / 2, -60, 10, W / 2, -60, 520);
+    t.addColorStop(0, rgba(c, 0.10)); t.addColorStop(1, rgba(c, 0));
+    ctx.fillStyle = t; ctx.fillRect(0, 0, W, y1);
+    ctx.restore();
+  }
   function drawChrome() {
+    drawModeGround();
     drawFloor();
     ctx.save(); enterGroup();
     if (chromeMode === "sport") { drawSportStatic(); ctx.restore(); return; }
