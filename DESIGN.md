@@ -341,7 +341,11 @@ Also available but unused: absolute load (43), relative throttle (45), barometri
   - **Frames:** received frames on ch 3/4 are the line's bytes with no timestamp; START/END markers are 4-byte timestamps only (PROTOCOL.md §7.9).
   - **Assembly:** messages are rebuilt from the byte stream by their format byte, and the checksum is checked (or not, if the cable strips it).
   - **Timing:** at least 60 ms is left between an answer and the next request (P3).
-- **Polling on the K-line:** one PID per request (KWP OBD doesn't take several). The pattern is rpm, speed, rpm, then one slower reading from a queue fed by the usual groups. The fake K-line car gives about 8 readings a second (Torque with the ELM got about 4.5).
+- **Polling on the K-line:** one PID per request (KWP OBD doesn't take several). Of every 5 requests: 3 rpm, 1 speed, 1 slower reading from a queue fed by the usual groups.
+- **K-line speed-ups (after the first real test, 2026-10-19):** the S500 gave 5 readings a second and choppy rpm.
+  - `ats4 12 0` sets P4_MIN to 0, so there are no gaps between our request's bytes.
+  - P3 is now 56 ms.
+  - The driver stamps `rpmAt` and `speedAt`. `feed()` tracks the real update interval, and `liveStep()` eases each needle over about 0.75× that interval (at least `liveEase`, at most 0.5 s), so a slow link glides instead of jumping. The fake K-line car gives about 8 readings a second (Torque with the ELM got about 4.5).
 - **Fake cable:** `obd/fake_openport.py --kline` (plus `--key A,B`) acts as a K-line car with CAN silent. `node tools/test_openport_js.mjs <dev> <s> kwp,can` sets the order.
 - **Profiles:** only the Elantra and the S500 now. S500 numbers:
   - **Engine:** M113 V8, redline 6000, idle 600, speedometer to 260, tank 88 L.
