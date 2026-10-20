@@ -2763,7 +2763,7 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
       st.textContent = "Car data: connecting…"; if (ask) setObdUi("connecting");
       try {
         lastMode = null; note(ask ? "connect (button)" : "connect (automatic)");
-        const ok = await OpenPortOBD.connect(m => { show(m); window.clusterFeed(m); }, note, ask);
+        const ok = await OpenPortOBD.connect(m => { show(m); window.clusterFeed(m); }, note, ask, PROFILE.obd);
         if (!ok) { st.textContent = "Car data: demo (keyboard and buttons)"; note("no cable allowed yet: tap Connect"); setObdUi("demo"); }
         else { st.textContent = "Car data: cable disconnected"; window.clusterFeed({ mode: "demo" }); setObdUi("demo"); }
       } catch (e) {
