@@ -76,6 +76,7 @@ def main():
             if verb == "ati": out = b"ari main code version : 1.17.4877 (fake)\r\n"
             elif verb in ("atz", "ata") or verb.startswith("ato") or verb.startswith("atc"): out = f"aro {seq}\r\n".encode()
             elif verb.startswith("atf"): out = f"arf{verb[3]} 0 {seq}\r\n".encode()
+            elif verb.startswith("ats"): out = f"aro {seq}\r\n".encode()
             elif verb.startswith("aty"):                                  # K-line fast init
                 time.sleep(0.12)
                 if KLINE and ignition() != "silent" and payload[:4] == bytes([0xC1, 0x33, 0xF1, 0x81]):

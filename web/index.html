@@ -2529,12 +2529,16 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   //        Gauges at zero, warning lamps off, like a real cluster before ON.
   //   on   ECU answering, engine not running (key ON: check engine + battery lamps lit)
   //   run  engine running (rpm >= runRpm)
-  const LIVE = { on: false, ecu: false, at: 0, v: {}, wasLive: false };
+  const LIVE = { on: false, ecu: false, at: 0, v: {}, wasLive: false, rpmAt: 0, rpmInt: 0, spdAt: 0, spdInt: 0 };
   function feed(m) {
     if (!m) return;
     const cable = m.mode === "live" || m.mode === "sim" || m.mode === "noecu";
     const ecu = m.mode === "live" || m.mode === "sim";
     if (ecu) { LIVE.v = m; LIVE.at = performance.now() / 1000; }
+    // how often rpm and speed really arrive (fast on CAN, a few times a second on the K-line)
+    const gap = (at, last, avg) => at && last && at > last ? (avg ? avg * 0.7 + (at - last) / 1000 * 0.3 : (at - last) / 1000) : avg;
+    if (m.rpmAt && m.rpmAt !== LIVE.rpmAt) { LIVE.rpmInt = gap(m.rpmAt, LIVE.rpmAt, LIVE.rpmInt); LIVE.rpmAt = m.rpmAt; }
+    if (m.speedAt && m.speedAt !== LIVE.spdAt) { LIVE.spdInt = gap(m.speedAt, LIVE.spdAt, LIVE.spdInt); LIVE.spdAt = m.speedAt; }
     if (cable !== LIVE.on) { LIVE.on = cable; D.gas = false; if (cable) D.engine = "off"; }
     LIVE.ecu = ecu;
     if (cable) LIVE.wasLive = true;
@@ -2543,10 +2547,12 @@ if (/[?&]kiosk\b/.test(location.search)) document.documentElement.classList.add(
   const ignition = () => !LIVE.on ? "on" : !LIVE.ecu ? "acc" : D.engine === "run" ? "run" : "on";
   function liveStep(dt) {
     const v = LIVE.v, fresh = LIVE.ecu && performance.now() / 1000 - LIVE.at < CFG.liveStale;
-    const ease = 1 - Math.exp(-dt / CFG.liveEase);
+    // the needle glides over about the time until the next reading, so a slow link (K-line, ~3 rpm
+    // readings a second) moves smoothly instead of jumping and stopping; a fast one stays snappy
+    const easeFor = int => 1 - Math.exp(-dt / Math.max(CFG.liveEase, Math.min(0.5, (int || 0) * 0.75)));
     const tr = fresh ? (v.rpm || 0) : 0, ts = fresh ? (v.speed || 0) : 0;
-    D.rpm += (tr - D.rpm) * ease;
-    D.speed += (ts - D.speed) * ease;
+    D.rpm += (tr - D.rpm) * easeFor(LIVE.rpmInt);
+    D.speed += (ts - D.speed) * easeFor(LIVE.spdInt);
     D.engine = D.rpm >= CFG.runRpm ? "run" : D.rpm >= CFG.offRpm ? "crank" : "off";
     const km = D.speed / 3600 * dt; S.tripA += km; S.tripB += km; S.tripDist += km;
     for (const k of ["coolant", "intakeTemp", "outsideTemp", "maf", "lambda", "engineLoad", "timing", "throttle", "batteryVolts", "checkEngine"])

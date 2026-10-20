@@ -16,7 +16,7 @@
   const REQ_ID = 0x7E0, RESP_ID = 0x7E8, CH = 6, PAD = 64;
   const KCH = 4;                                       // OpenPort channel for ISO 14230 (K-line)
   const KWP_START = [0xC1, 0x33, 0xF1, 0x81];          // StartCommunication, functional address 33, tester F1
-  const KWP_P3 = 60;                                   // ms to leave between an ECU reply and the next request
+  const KWP_P3 = 56;                                   // ms between an ECU reply and the next request (ISO 14230 P3 min 55)
   const sum8 = a => a.reduce((x, y) => x + y, 0) & 0xFF;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const REPLY_TIMEOUT = 150;                         // ms to wait for an ECU reply
@@ -161,6 +161,8 @@
     async openKwp() {
       let r = await this.cmd(`ato${KCH} 4608 10400 0`);
       if (!r || !r.startsWith("aro")) throw new Error("could not open the K-line: " + r);
+      // P4_MIN (param 12) = 0: our request goes out without gaps between bytes (about 30 ms sooner)
+      await this.cmd(`ats${KCH} 12 0`, null, 300);
       r = await this.cmd(`atf${KCH} 1 0 1`, Uint8Array.from([0, 0]));
       if (!r || !r.startsWith("arf")) throw new Error("could not set the K-line filter: " + r);
       this.proto = "kwp";
@@ -285,6 +287,8 @@
     const got1 = (vals, got) => {
       if (!got.length) return false;
       lastEcu = Date.now(); polls++;
+      if ("rpm" in vals) state.rpmAt = lastEcu;
+      if ("speed" in vals) state.speedAt = lastEcu;
       Object.assign(state, vals, { mode: "live", protocol: proto }); emit();
       return true;
     };
@@ -311,9 +315,9 @@
           }
         }
       } else {
-        // K-line: one PID a request. rpm and speed keep coming; the slower readings take every 4th turn.
+        // K-line: one PID a request. Of every 5: rpm 3, speed 1, one slower reading (coolant, load, ...).
         for (let gi = 1; gi < GROUPS.length; gi++) if (now >= due[gi]) { due[gi] = now + GROUPS[gi].every; for (const p of GROUPS[gi].pids) if (!kq.includes(p)) kq.push(p); }
-        const pid = [0x0C, 0x0D, 0x0C][kturn % 4] ?? (kq.shift() ?? 0x0D); kturn++;
+        const pid = [0x0C, 0x0D, 0x0C, 0x0C][kturn % 5] ?? (kq.shift() ?? 0x0D); kturn++;
         const { vals, got } = parseMode01(await port.request([0x01, pid]));
         got1(vals, got);
       }
