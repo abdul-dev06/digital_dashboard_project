@@ -15,20 +15,22 @@
   #ua { font: 11px ui-monospace, monospace; color: #6f7b88; margin-top: 16px; word-break: break-all; }
 </style>
 <h1>Head unit: hidden screens</h1>
-<p>Tap each one. If something opens, take a photo. "Unknown URL scheme" or nothing happening means this browser can't open it.</p>
+<p>Numbered so you can tell me which did what. Tap each one. If something opens, take a photo. "Unknown URL scheme" or nothing happening means this browser can't open it.</p>
 <div class="grid" id="g"></div>
 <div id="ua"></div>
 <script>
 const I = s => "intent:#Intent;" + s + ";end";
+const S = c => I("component=com.android.settings/" + c);
 const links = [
+  // first round
   ["Developer options", I("action=android.settings.APPLICATION_DEVELOPMENT_SETTINGS")],
-  ["Developer options (direct)", I("component=com.android.settings/.Settings$DevelopmentSettingsDashboardActivity")],
+  ["Developer options (direct)", S(".Settings$DevelopmentSettingsDashboardActivity")],
   ["Install unknown apps", I("action=android.settings.MANAGE_UNKNOWN_APP_SOURCES")],
-  ["Device admin apps", I("component=com.android.settings/.Settings$DeviceAdminSettingsActivity")],
+  ["Device admin apps", S(".Settings$DeviceAdminSettingsActivity")],
   ["Security", I("action=android.settings.SECURITY_SETTINGS")],
   ["All apps", I("action=android.settings.MANAGE_ALL_APPLICATIONS_SETTINGS")],
   ["Home app chooser", I("action=android.settings.HOME_SETTINGS")],
-  ["Testing menu", I("component=com.android.settings/.Settings$TestingSettingsActivity")],
+  ["Testing menu", S(".Settings$TestingSettingsActivity")],
   ["MediaTek engineer mode", I("component=com.mediatek.engineermode/.EngineerMode")],
   ["Android settings (full)", I("action=android.settings.SETTINGS")],
   ["About device", I("action=android.settings.DEVICE_INFO_SETTINGS")],
@@ -36,11 +38,33 @@ const links = [
   ["Play Store: Chrome (intent)", I("action=android.intent.action.VIEW;data=market://details?id=com.android.chrome")],
   ["TC core app", I("package=com.tc.core;action=android.intent.action.MAIN")],
   ["TC store app", I("package=com.triple.sapp;action=android.intent.action.MAIN")],
+  // second round: explicit screens of the Android 10 Settings app
+  ["Settings home (explicit)", S(".Settings")],
+  ["Developer options (old name)", S(".DevelopmentSettings")],
+  ["Unknown apps (explicit)", S(".Settings$ManageExternalSourcesActivity")],
+  ["Unknown apps for WebView Shell", I("action=android.settings.MANAGE_UNKNOWN_APP_SOURCES;data=package:org.chromium.webview_shell")],
+  ["Unknown apps for Files", I("action=android.settings.MANAGE_UNKNOWN_APP_SOURCES;data=package:com.android.documentsui")],
+  ["App info: TC core", I("action=android.settings.APPLICATION_DETAILS_SETTINGS;data=package:com.tc.core")],
+  ["App info: TcLauncher", I("action=android.settings.APPLICATION_DETAILS_SETTINGS;data=package:com.tc.launcher")],
+  ["App info: Package installer", I("action=android.settings.APPLICATION_DETAILS_SETTINGS;data=package:com.android.packageinstaller")],
+  ["App info: Google Play", I("action=android.settings.APPLICATION_DETAILS_SETTINGS;data=package:com.android.vending")],
+  ["All apps (explicit)", S(".Settings$ManageApplicationsActivity")],
+  ["About (explicit)", S(".Settings$MyDeviceInfoActivity")],
+  ["Users / work profile", I("action=android.settings.USER_SETTINGS")],
+  ["Special app access", S(".Settings$SpecialAccessSettingsActivity")],
+  ["System (explicit)", S(".Settings$SystemDashboardActivity")],
+  ["Launcher3 (stock home)", I("component=com.android.launcher3/.Launcher")],
+  ["Quickstep (stock home)", I("component=com.android.launcher3/com.android.quickstep.RecentsActivity")],
+  ["Allwinner/other engineer", I("component=com.softwinner.agingdragonbox/.Main")],
+  ["Hidden settings (Rockchip)", I("component=com.android.settings/.Settings$DevelopmentSettingsActivity")],
+  ["Play Store home", I("package=com.android.vending;action=android.intent.action.MAIN")],
+  ["Chrome (if hidden)", I("package=com.android.chrome;action=android.intent.action.MAIN")],
 ];
 const g = document.getElementById("g");
-for (const [name, href] of links) {
-  const a = document.createElement("a"); a.href = href; a.innerHTML = name + "<small>" + href.replace(/</g, "&lt;") + "</small>"; g.appendChild(a);
-}
+links.forEach(([name, href], i) => {
+  const a = document.createElement("a"); a.href = href;
+  a.innerHTML = "<b>#" + (i + 1) + "</b> " + name + "<small>" + href.replace(/</g, "&lt;") + "</small>"; g.appendChild(a);
+});
 document.getElementById("ua").textContent = navigator.userAgent;
 </script>
 </html>
