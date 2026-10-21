@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Head unit doors</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px; background: #05070a; color: #e8ecf0; font: 15px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { color: #8b96a2; margin: 0 0 14px; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  a { display: block; padding: 12px 14px; border: 1px solid #222b35; border-radius: 10px; background: #0d1116; color: #e8ecf0; text-decoration: none; }
+  a small { display: block; color: #6f7b88; font-size: 11px; margin-top: 3px; word-break: break-all; }
+  a:active { border-color: #3d8bff; }
+  #ua { font: 11px ui-monospace, monospace; color: #6f7b88; margin-top: 16px; word-break: break-all; }
+</style>
+<h1>Head unit: hidden screens</h1>
+<p>Tap each one. If something opens, take a photo. "Unknown URL scheme" or nothing happening means this browser can't open it.</p>
+<div class="grid" id="g"></div>
+<div id="ua"></div>
+<script>
+const I = s => "intent:#Intent;" + s + ";end";
+const links = [
+  ["Developer options", I("action=android.settings.APPLICATION_DEVELOPMENT_SETTINGS")],
+  ["Developer options (direct)", I("component=com.android.settings/.Settings$DevelopmentSettingsDashboardActivity")],
+  ["Install unknown apps", I("action=android.settings.MANAGE_UNKNOWN_APP_SOURCES")],
+  ["Device admin apps", I("component=com.android.settings/.Settings$DeviceAdminSettingsActivity")],
+  ["Security", I("action=android.settings.SECURITY_SETTINGS")],
+  ["All apps", I("action=android.settings.MANAGE_ALL_APPLICATIONS_SETTINGS")],
+  ["Home app chooser", I("action=android.settings.HOME_SETTINGS")],
+  ["Testing menu", I("component=com.android.settings/.Settings$TestingSettingsActivity")],
+  ["MediaTek engineer mode", I("component=com.mediatek.engineermode/.EngineerMode")],
+  ["Android settings (full)", I("action=android.settings.SETTINGS")],
+  ["About device", I("action=android.settings.DEVICE_INFO_SETTINGS")],
+  ["Play Store: Chrome", "market://details?id=com.android.chrome"],
+  ["Play Store: Chrome (intent)", I("action=android.intent.action.VIEW;data=market://details?id=com.android.chrome")],
+  ["TC core app", I("package=com.tc.core;action=android.intent.action.MAIN")],
+  ["TC store app", I("package=com.triple.sapp;action=android.intent.action.MAIN")],
+];
+const g = document.getElementById("g");
+for (const [name, href] of links) {
+  const a = document.createElement("a"); a.href = href; a.innerHTML = name + "<small>" + href.replace(/</g, "&lt;") + "</small>"; g.appendChild(a);
+}
+document.getElementById("ua").textContent = navigator.userAgent;
+</script>
+</html>
